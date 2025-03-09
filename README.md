@@ -16,7 +16,7 @@ The raw data consists of both a normal camera recording together with an event r
 - Cut the video into smaller clips (1min/5min)
 - Get the event file into a streamable format
 - Bin the events into ~10ms frames
-- Generate labels from the normal frames (using YOLO)
+- Generate labels from the normal frames (using [YOLOv11](https://github.com/ultralytics/ultralytics))
 - Transfer the labels using homography
 - Transform bounding boxes to Gaussian “blobs”
 
@@ -31,7 +31,7 @@ Divide the video into shorter clips. Provide the input file, output directory an
 `create_event_frames.py`
 This file bins the events into frames. The events during a specific time interval are accumulated into frames, the time interval decided by the timestamps.csv provided from the data recordings.
 
-To generate the labels [YOLOv11](https://github.com/ultralytics/ultralytics) is used and can be executed using the following command:
+To generate the labels, [YOLOv11](https://github.com/ultralytics/ultralytics) is used and can be executed using the following command:
 
 ```shell
 yolo track model="yolo11n.pt" source="[path/to/footage]" conf=0.3, iou=0.5 project="yolo/results/" save_txt=true device="cuda:[deviceID]"
@@ -50,16 +50,20 @@ Choose how much information you want to provide your target. You should include 
 
 # Requirements
 
-The main components needed are the following:
+The main external packages and libraries needed are the following:
 
-- > **PyTorch** <br>
+- > **PyTorch**
+  >
   > Pytorch ...
-- > **Norse** <br>
+- > **Norse**
+  >
   > Norse ...
-- > **YOLOv11** <br>
-  > YOLO is required since it is used in the preprocessing pipeline to generate the labels used to label the event frames. However, if the required training data has already been generated then YOLO is no longer required.
 
-All requirements needed to run all aspects of the code are listed in the `requirements.txt` file.
+- > **YOLOv11**
+  >
+  > [YOLOv11](https://github.com/ultralytics/ultralytics) is required since it is used in the preprocessing pipeline to generate the labels used to label the event frames. However, if the required training data has already been generated then YOLO is no longer required.
+
+All required dependencies needed to run all aspects of the code are listed in the `requirements.txt` file and what verisions where used during the course of this thesis.
 
 # Installation
 
@@ -73,3 +77,18 @@ Loads the data into sequences
 
 *SNN_final_model.py*
 The model used for the final tests  -->
+
+<style>
+blockquote {
+    color: #ddd;
+    background-color: #222;
+    border-left: 5px solid #004f88;
+}
+
+code {
+    white-space: nowrap;
+    background-color:#656c764d;
+    color:#cfb665;
+    padding: 1px;
+}
+</style>
