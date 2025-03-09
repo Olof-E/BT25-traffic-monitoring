@@ -26,7 +26,13 @@ The different stages of the preprocesing pipeline listed above are separated int
 This file is for cutting out a certain part of the frame. The idea is not to process the whole frame since it requires more space, which also helps YOLO run. The cutout size is adjusted case by case, depending on what part of the video you want to cut out. The same thing is true for the start of x and y.
 
 `cut_video.py`
-Divide the video into shorter clips. Provide the input file, output directory and desired length of the file. I originally went with 5 minutes, so 60 \* 5, but maybe 1 minute would be better for smaller file sizes.
+Divides the given source video into shorter clips for easier processing. The file can be run as follows:
+
+```shell
+py cut_video.py path/to/footage path/to/output_dir 300
+```
+
+Where the required arguments are the `input_file`, `output_dir`, and the desired `length` of the produced clips in seconds. The default length is 5 minutes.
 
 `create_event_frames.py`
 This file bins the events into frames. The events during a specific time interval are accumulated into frames, the time interval decided by the timestamps.csv provided from the data recordings.
@@ -34,10 +40,10 @@ This file bins the events into frames. The events during a specific time interva
 To generate the labels, [YOLOv11](https://github.com/ultralytics/ultralytics) is used and can be executed using the following command:
 
 ```shell
-yolo track model="yolo11n.pt" source="[path/to/footage]" conf=0.3, iou=0.5 project="yolo/results/" save_txt=true device="cuda:[deviceID]"
+yolo track model="yolo11n.pt" source="[path/to/footage]" conf=0.25, iou=0.5 project="yolo/results/" save_txt=true device="cuda:[deviceID]"
 ```
 
-where `[path/to/footage]` should be replaced with the filepath to the source footage that you want to generate the labels and bounding box data for and `[deviceID]` should be replaced with the ID of the gpu to be used for processing. If needed the processing can be done on the cpu in which case `cuda:[deviceID]` can either be replaced by `cpu` or the entire `device` argument may be omitted.
+where `[path/to/footage]` should be replaced with the filepath to the source footage that you want to generate the labels and bounding box data for and `[deviceID]` should be replaced with the ID of the gpu to be used for processing. If needed, the processing can be done on the cpu in which case `cuda:[deviceID]` can either be replaced by `cpu` or the entire `device` argument may be omitted.
 
 `transfer_labels.py`
 Manually check the diff between the event file and the video file and add that offset before transferring; it’s possible to see the result by using the plotting function.
@@ -77,18 +83,3 @@ Loads the data into sequences
 
 *SNN_final_model.py*
 The model used for the final tests  -->
-
-<style>
-blockquote {
-    color: #ddd;
-    background-color: #222;
-    border-left: 5px solid #004f88;
-}
-
-code {
-    white-space: nowrap;
-    background-color:#656c764d;
-    color:#cfb665;
-    padding: 1px;
-}
-</style>
