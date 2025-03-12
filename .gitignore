@@ -1,0 +1,15 @@
+.venv/
+model_versions/
+runs/
+
+yolo/
+
+*.pt
+*.raw
+*.jpg
+*.png
+*.csv
+*.mp4
+*.avi
+*.txt
+!requirements.txt
