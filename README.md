@@ -13,7 +13,7 @@ The raw data consists of both a normal camera recording together with an event r
 **Outline of the preprocessing**
 
 - Crop a smaller part of the whole frame-based video
-- Cut the video into smaller clips (1min/5min)
+- Cut the video into smaller clips (1min)
 - Get the event file into a streamable format
 - Bin the events into ~10ms frames
 - Generate labels from the normal frames (using [YOLOv11](https://github.com/ultralytics/ultralytics))
@@ -22,11 +22,8 @@ The raw data consists of both a normal camera recording together with an event r
 
 The different stages of the preprocesing pipeline listed above are separated into individual files:
 
-`cut_out_video.py`
-This file is for cutting out a certain part of the frame. The idea is not to process the whole frame since it requires more space, which also helps YOLO run. The cutout size is adjusted case by case, depending on what part of the video you want to cut out. The same thing is true for the start of x and y.
-
 `cut_video.py`
-Divides the given source video into shorter clips for easier processing. The file can be run as follows:
+Crops the given source video according to the given (Width, Height) and the top left corner (x_start, y_start) and also cuts the source into shorter clips for easier processing. The file can be run as follows:
 
 ```shell
 py cut_video.py path/to/footage path/to/output_dir 300
@@ -58,16 +55,17 @@ Choose how much information you want to provide your target. You should include 
 
 The main external packages and libraries needed are the following:
 
-- > **PyTorch**
-  >
-  > Pytorch ...
-- > **Norse**
-  >
-  > Norse ...
+- **PyTorch**
 
-- > **YOLOv11**
-  >
-  > [YOLOv11](https://github.com/ultralytics/ultralytics) is required since it is used in the preprocessing pipeline to generate the labels used to label the event frames. However, if the required training data has already been generated then YOLO is no longer required.
+  Pytorch ...
+
+- **Norse**
+
+  Norse ...
+
+- **YOLOv11**
+
+  [YOLOv11](https://github.com/ultralytics/ultralytics) is required since it is used in the preprocessing pipeline to generate the labels used to label the event frames. However, if the required training data has already been generated then YOLO is no longer required.
 
 All required dependencies needed to run all aspects of the code are listed in the `requirements.txt` file and what verisions where used during the course of this thesis.
 
