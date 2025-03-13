@@ -1,11 +1,11 @@
 from collections import namedtuple
-from queue import Queue
-from threading import Thread
 import numpy as np
 
 
+Event = namedtuple("Event", "x y polarity timestamp")
+
+
 class EventStream:
-    Event = namedtuple("Event", "x y polarity timestamp")
 
     data = []
 
@@ -22,7 +22,7 @@ class EventStream:
     def __init__(self, fpath):
         self.data = np.memmap(filename=fpath, mode="r", dtype=np.uint32, offset=239)
 
-    def read(self):
+    def read(self) -> Event:
         if len(self.event_buffer) > 0:
             return self.event_buffer.pop(0)
         else:
@@ -44,7 +44,7 @@ class EventStream:
                     # print(f"y: {event_y}")
                     # print(f"p: {polarity}")
 
-                    self.event_buffer.append(self.Event(event_x, event_y, polarity, timestamp))
+                    self.event_buffer.append(Event(event_x, event_y, polarity, timestamp))
                     i += 1
                 elif (next_wrd >> 28) == 0x8:  # Handle EVT_TIME_HIGH
                     # print("EVT_TIME_HIGH")

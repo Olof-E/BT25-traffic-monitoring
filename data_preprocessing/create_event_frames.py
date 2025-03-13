@@ -30,29 +30,25 @@ for video_nr in range(start_video_nr, end_video_nr):
     for _ in tqdm(range(15_000)):
         frame = np.zeros((frame_height, frame_width))
 
-        while (curr_evt[3] - start) < 10_000:
-            time_since_start = curr_evt[3] - start
+        while (curr_evt.timestamp - start) < 10_000:
+            time_since_start = curr_evt.timestamp - start
 
             decay_multiplier = 1
             if decay:  # add decay rate if desired
                 decay_multiplier = np.exp(-time_since_start / decay_rate)
-            frame[curr_evt[1], curr_evt[0]] = curr_evt[2] * decay_multiplier
+            frame[curr_evt.y, curr_evt.x] = curr_evt.polarity * decay_multiplier
 
             curr_evt = stream.read()
 
-        start = curr_evt[3]
-        frames.append(frame)
+        start = curr_evt.timestamp
+        frames.append(torch.tensor(frame).to_sparse())
 
     print("Processing complete.")
 
-    # # Review outputs
-    # filename = f"event_frames_{video_nr}.pt"
-    # print(frames.shape)
-    # torch.save(frames, filename)
-    # print(f"Saved frames to: {filename}")
-
-    # print(frames.size)
-    # print(frames.shape)
+    # Review outputs
+    filename = f"event_frames_{video_nr}.pt"
+    torch.save(torch.stack(frames), filename)
+    print(f"Saved frames to: {filename}")
 
     out = cv2.VideoWriter(
         f"testVid_stream.mp4", cv2.VideoWriter_fourcc(*"mp4v"), 100, (frame_width, frame_height), 0
@@ -60,7 +56,9 @@ for video_nr in range(start_video_nr, end_video_nr):
 
     shape = frames[0].shape
     for i in tqdm(range(len(frames))):
-        image_scaled = minmax_scale(frames[i].ravel(), feature_range=(0, 255)).reshape(shape)
+        image_scaled = minmax_scale(
+            frames[i].to_dense().numpy().ravel(), feature_range=(0, 255), copy=False
+        ).reshape(shape)
         out.write(np.uint8(image_scaled))
 
     out.release()
