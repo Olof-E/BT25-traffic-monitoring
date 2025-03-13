@@ -9,7 +9,7 @@ from event_streamer import EventStream
 cuda_device = 0
 start_video_nr = 0
 end_video_nr = 1
-decay_rate = 1
+decay_rate = 0.0002
 frame_width = 640
 frame_height = 480
 
@@ -27,7 +27,7 @@ for video_nr in range(start_video_nr, end_video_nr):
     curr_evt = stream.read()
     start = curr_evt.timestamp
 
-    for _ in tqdm(range(15_000)):
+    for _ in tqdm(range(6000)):
         frame = np.zeros((frame_height, frame_width))
 
         while (curr_evt.timestamp - start) < 10_000:
@@ -35,7 +35,7 @@ for video_nr in range(start_video_nr, end_video_nr):
 
             decay_multiplier = 1
             if decay:  # add decay rate if desired
-                decay_multiplier = np.exp(-time_since_start / decay_rate)
+                decay_multiplier = np.exp(-(time_since_start * decay_rate))
             frame[curr_evt.y, curr_evt.x] = curr_evt.polarity * decay_multiplier
 
             curr_evt = stream.read()
@@ -51,7 +51,11 @@ for video_nr in range(start_video_nr, end_video_nr):
     print(f"Saved frames to: {filename}")
 
     out = cv2.VideoWriter(
-        f"testVid_stream.mp4", cv2.VideoWriter_fourcc(*"mp4v"), 100, (frame_width, frame_height), 0
+        f"testVid_stream.mp4",
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        100,
+        (frame_width, frame_height),
+        False,
     )
 
     shape = frames[0].shape

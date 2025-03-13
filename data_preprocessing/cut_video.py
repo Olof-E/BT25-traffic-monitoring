@@ -11,13 +11,21 @@ square_size = (512, 512)  # size of the cutout
 x_start = 430
 y_start = square_size[1] - 256  # 256 approximated case by case
 
+new_width = 0
+new_height = 0
+
 
 def split_video(path, length, output):
 
     cap = cv2.VideoCapture(path)
     fps = 100  # int(cap.get(cv2.CAP_PROP_FPS))
-    # width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    # height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    aspect_ratio = height / width
+    new_width = 720
+    new_height = int(new_width * aspect_ratio)
+
     frames_per_clip = length * fps
     current_clip = 0
     frames = []
@@ -30,9 +38,9 @@ def split_video(path, length, output):
         if not ret:
             break
 
-        frames.append(
-            frame[y_start : y_start + square_size[1], x_start : x_start + square_size[0]].copy()
-        )
+        new_frame = cv2.resize(src=frame, dsize=(new_width, new_height))
+        # print(new_frame)
+        frames.append(new_frame.copy())
 
         if len(frames) == frames_per_clip:
             Thread(target=save_clip, args=[frames.copy(), output, current_clip, fps]).start()
@@ -40,7 +48,6 @@ def split_video(path, length, output):
             frames.clear()
 
             current_clip += 1
-            # print(f"Video: {current_clip} is processed")
 
     cap.release()
 
@@ -50,11 +57,13 @@ def save_clip(frames, output, current_clip, fps):
         f"{output}_{current_clip}.mp4",
         cv2.VideoWriter_fourcc(*"mp4v"),
         fps,
-        square_size,
+        (frames[0].shape[1], frames[0].shape[0]),
+        False,
     )
     for f in frames:
-        out.write(f)
+        out.write(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY))
 
+    print(f"Video: {current_clip} is processed")
     out.release()
 
 
