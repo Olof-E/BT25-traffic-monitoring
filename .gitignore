@@ -4,8 +4,13 @@ runs/
 
 yolo/
 
+converter/
+
+__pycache__
+
 *.pt
 *.raw
+*.json
 *.jpg
 *.png
 *.csv

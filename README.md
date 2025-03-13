@@ -1,6 +1,6 @@
 # SNN and Event cameras for traffic monitoring
 
-This repo contains the code for the Bachelor thesis work in the course IA150X with the title "_Event Cameras and Spiking Neural Networks for Tracking and Classification in Traffic Monitoring_". This work is also an extension made to a previous Master thesis work, read the [Acknowledgements](#acknowledgements) section for more information.
+This repo contains the code for the Bachelor thesis work in the course IA150X with the title "_Event Cameras and Spiking Neural Networks for Tracking and Classification in Traffic Monitoring_". This work is also a continuation made to a previous Master thesis work, read the [Acknowledgements](#acknowledgements) section for more information.
 
 # Acknowledgements
 
