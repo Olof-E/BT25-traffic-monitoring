@@ -23,7 +23,7 @@ torch.cuda.set_device(device=cuda_device)
 
 stream = EventStream("../events.raw")
 
-total_time = 0
+total_runtime = 0
 
 for clip_nr in range(num_of_clips):
     print(f"")
