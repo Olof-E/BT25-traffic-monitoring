@@ -34,6 +34,10 @@ class EventStream:
 
                 while len(self.event_buffer) < 1000:
                     byte_buffer = f.read(2048)
+                    if not byte_buffer:
+                        self.event_buffer.append(None)
+                        return
+
                     for data in struct.iter_unpack("I", byte_buffer):
                         self.last_event_byte += 4
                         data = data[0]
