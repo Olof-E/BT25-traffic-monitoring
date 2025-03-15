@@ -1,6 +1,4 @@
 import argparse
-from ast import arg
-import sys
 import time
 import cv2
 import numpy as np

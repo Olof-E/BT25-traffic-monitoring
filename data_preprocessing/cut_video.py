@@ -1,8 +1,8 @@
-from threading import Thread
-from tqdm import tqdm
-from multiprocessing import Process
+import time
 import cv2
 import argparse
+from tqdm import tqdm
+from threading import Thread
 
 # "/mnt/usb_data_READ_ONLY/data_collection/week_31/box_2/2024_08_01_16_40_03_recordings/video.avi"  # video file to divide
 # "/home/olofeli/traffic-monit/data/clips/w31/2-08/"
@@ -13,11 +13,12 @@ def split_video(fpath, output_dir, length, num_of_clips):
     cap = cv2.VideoCapture(fpath)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = 100
 
     aspect_ratio = height / width
-    new_width = 640
-    new_height = 480  # int(new_width * aspect_ratio)
+    new_width = 736
+    new_height = int(new_width * aspect_ratio)
 
     frames_per_clip = length * fps
     current_clip = 0
@@ -25,13 +26,15 @@ def split_video(fpath, output_dir, length, num_of_clips):
 
     save_thread = None
 
-    while current_clip < num_of_clips:
-        for _ in tqdm(
-            range(frames_per_clip),
-            desc=f"processing clip {current_clip+1}/{num_of_clips}",
-            ncols=86,
-            leave=True,
-        ):
+    with tqdm(
+        range(frames_per_clip * num_of_clips),
+        desc=f"processing clip {current_clip+1}/{num_of_clips}",
+        ncols=86,
+        position=0,
+        leave=False,
+        mininterval=0.25,
+    ) as t:
+        for _ in t:
             ret, frame = cap.read()
             if not ret:
                 break
@@ -39,22 +42,28 @@ def split_video(fpath, output_dir, length, num_of_clips):
             new_frame = cv2.resize(src=frame, dsize=(new_width, new_height))
             frames.append(new_frame.copy())
 
-        if save_thread and save_thread.is_alive():
-            save_thread.join()
-        save_thread = Thread(
-            target=save_clip,
-            args=[frames.copy(), output_dir, current_clip, num_of_clips, fps],
-        )
-        save_thread.start()
+            if len(frames) == frames_per_clip:
+                if save_thread and save_thread.is_alive():
+                    save_thread.join()
 
-        frames.clear()
+                save_thread = Thread(
+                    target=save_clip,
+                    args=[frames.copy(), output_dir, current_clip, num_of_clips, fps],
+                )
+                save_thread.start()
 
-        current_clip += 1
+                frames.clear()
+
+                current_clip += 1
+                t.set_description(f"processing clip {current_clip+1}/{num_of_clips}")
 
     cap.release()
     if save_thread.is_alive():
-        print("\nWaiting for all data to be saved...")
         save_thread.join()
+        tqdm.write(
+            f"\nFinished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(t.format_dict['elapsed']))}\x1b[22m"
+        )
+        tqdm.write(f"Clips saved to: \x1b[1m{output_dir}\x1b[22m")
 
 
 def save_clip(frames, output_dir, current_clip, num_of_clips, fps):
@@ -63,14 +72,15 @@ def save_clip(frames, output_dir, current_clip, num_of_clips, fps):
         cv2.VideoWriter_fourcc(*"mp4v"),
         fps,
         (frames[0].shape[1], frames[0].shape[0]),
-        False,
     )
     for f in tqdm(
         frames,
         desc=f"saving clip {current_clip+1}/{num_of_clips}",
         ncols=86,
+        mininterval=0.25,
+        leave=False,
     ):
-        out.write(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY))
+        out.write(f)
 
     out.release()
 
