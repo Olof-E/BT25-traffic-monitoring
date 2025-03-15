@@ -17,7 +17,7 @@ def split_video(fpath, output_dir, length, num_of_clips):
     fps = 100
 
     aspect_ratio = height / width
-    new_width = 736
+    new_width = 928
     new_height = int(new_width * aspect_ratio)
 
     frames_per_clip = length * fps
@@ -39,8 +39,10 @@ def split_video(fpath, output_dir, length, num_of_clips):
             if not ret:
                 break
 
-            new_frame = cv2.resize(src=frame, dsize=(new_width, new_height))
-            frames.append(new_frame.copy())
+            new_frame = cv2.resize(
+                src=frame, dsize=(new_width, new_height), interpolation=cv2.INTER_AREA
+            )
+            frames.append(new_frame)
 
             if len(frames) == frames_per_clip:
                 if save_thread and save_thread.is_alive():
@@ -113,4 +115,7 @@ args = parser.parse_args()
 split_video(args.filename, args.output_dir, args.length, args.clips_count)
 
 
-# yolo track model="yolo/yolo11n.pt" source="clips/test/" conf=0.35, iou=0.5 project="yolo/results/" save_txt=true device="cuda:0" batch=16 half imgsz="(736, 416)"
+# yolo track model="yolo/yolo11n.pt" source="2-08/_8.mp4" conf=0.3, iou=0.35 project="yolo/results/" save_txt=true device="cuda:0" batch=64 half verbose=False
+
+
+# yolo track model="yolo/yolo12n.pt" source="2-08/_0-area.mp4" conf=0.3, iou=0.8 project="yolo/results/" save_txt=False device="cuda:0" batch=128 half verbose=False stream_buffer=True augment=True agnostic_nms=True
