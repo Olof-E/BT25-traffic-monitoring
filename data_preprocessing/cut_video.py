@@ -60,7 +60,7 @@ def split_video(fpath, output_dir, length, num_of_clips):
                 t.set_description(f"processing clip {current_clip+1}/{num_of_clips}")
 
     cap.release()
-    if save_thread.is_alive():
+    if save_thread and save_thread.is_alive():
         save_thread.join()
         tqdm.write(
             f"\nFinished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(t.format_dict['elapsed']))}\x1b[22m"

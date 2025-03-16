@@ -1,11 +1,10 @@
 import argparse
 import time
 import cv2
-import numpy as np
-from sklearn.preprocessing import minmax_scale
 import torch
+import numpy as np
 from tqdm import tqdm
-
+from sklearn.preprocessing import minmax_scale
 from event_streamer import EventStream
 
 cuda_device = 0

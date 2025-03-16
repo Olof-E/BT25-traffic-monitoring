@@ -2,23 +2,29 @@ from collections import namedtuple
 import struct
 import numpy as np
 
-
+# Return type
 Event = namedtuple("Event", "x y polarity timestamp")
+
+# EVT2 events
+CD_ON = 0x1
+CD_OFF = 0x0
+EVT_TIME_HIGH = 0x8
+
+
+# Bit masks for extracting event info
+mask_6b = np.uint32(0x3F)
+mask_11b = np.uint32(0x7FF)
+mask_28b = np.uint32(0xFFFFFFF)
 
 
 class EventStream:
 
-    data = []
     fpath = ""
 
     event_buffer = []
 
-    mask_6b = np.uint32(0x3F)
-    mask_11b = np.uint32(0x7FF)
-    mask_28b = np.uint32(0xFFFFFFF)
-
-    # Start at 239 to skip EVT2 headers
-    last_event_byte = 239
+    # Start at byte 239 to skip the EVT2 file headers
+    last_read_byte = 239
 
     time_high = np.uint64(0)
 
@@ -30,7 +36,7 @@ class EventStream:
             return self.event_buffer.pop(0)
         else:
             with open(self.fpath, "rb") as f:
-                f.seek(self.last_event_byte)
+                f.seek(self.last_read_byte)
 
                 while len(self.event_buffer) < 1000:
                     byte_buffer = f.read(2048)
@@ -39,23 +45,27 @@ class EventStream:
                         return
 
                     for data in struct.iter_unpack("I", byte_buffer):
-                        self.last_event_byte += 4
+                        self.last_read_byte += 4
                         data = data[0]
 
                         event_type = data >> 28
-                        if event_type <= 0x1:  # Handle CD_ON & CD_OFF
+                        if event_type == CD_OFF or event_type == CD_ON:
                             # Combine lower half with upper half of timestamp
-                            timestamp = self.time_high << 6 | ((data >> 22) & self.mask_6b)
+                            timestamp = self.time_high << 6 | ((data >> 22) & mask_6b)
 
-                            event_x = data >> 11 & self.mask_11b
-                            event_y = data & self.mask_11b
+                            event_x = data >> 11 & mask_11b
+                            event_y = data & mask_11b
 
                             polarity = event_type
 
                             self.event_buffer.append(Event(event_x, event_y, polarity, timestamp))
 
-                        elif (data >> 28) == 0x8:  # Handle EVT_TIME_HIGH
+                        elif (data >> 28) == EVT_TIME_HIGH:
                             # Extract upper half of full timestamp
-                            self.time_high = data & self.mask_28b
+                            self.time_high = data & mask_28b
 
             return self.read()
+
+
+def testing():
+    pass
