@@ -14,10 +14,10 @@ def split_video(fpath, output_dir, length, num_of_clips):
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = 100
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
 
     aspect_ratio = height / width
-    new_width = 928
+    new_width = 736
     new_height = int(new_width * aspect_ratio)
 
     frames_per_clip = length * fps

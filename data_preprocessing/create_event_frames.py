@@ -14,6 +14,8 @@ frame_height = 480
 
 decay = False  # set true to add decay to the input events
 
+fps = 90
+
 
 def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids):
     torch.cuda.set_device(device=cuda_device)
@@ -22,14 +24,19 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
 
     total_runtime = 0
 
+    # Convert ms bin size to us
+    frame_bin = bin_size * 1000
+
     for clip_nr in range(num_of_clips):
         frames = []
-
-        curr_evt = stream.read()
-        start = curr_evt.timestamp
+        start = 0
+        curr_evt = None
+        while start == 0:
+            curr_evt = stream.read()
+            start = curr_evt.timestamp
 
         with tqdm(
-            range(clip_length * 100),
+            range(clip_length * fps),
             ncols=86,
             desc=f"processing clip {clip_nr+1}/{num_of_clips}",
             leave=False,
@@ -37,12 +44,13 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
         ) as t_proc:
             for _ in t_proc:
                 frame = np.zeros((frame_height, frame_width))
-                while curr_evt and (curr_evt.timestamp - start) < bin_size * 1000:
-                    time_since_start = curr_evt.timestamp - start
+                while curr_evt and (curr_evt.timestamp - start) < frame_bin:
 
                     decay_multiplier = 1
                     if decay:  # add decay rate if desired
+                        time_since_start = curr_evt.timestamp - start
                         decay_multiplier = np.exp(-(time_since_start * decay_rate))
+
                     frame[curr_evt.y, curr_evt.x] = curr_evt.polarity * decay_multiplier
 
                     curr_evt = stream.read()
@@ -63,7 +71,7 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
             out = cv2.VideoWriter(
                 f"{output_dir}event_clip_{clip_nr}.mp4",
                 cv2.VideoWriter_fourcc(*"mp4v"),
-                100,
+                fps,
                 (frame_width, frame_height),
                 False,
             )
@@ -122,12 +130,12 @@ parser.add_argument(
 parser.add_argument(
     "-b",
     "--bin",
-    default=10,
-    type=int,
+    default=10.0,
+    type=float,
     help="The desired bin size for the event frames in milliseconds (default: %(default)s ms)",
 )
 parser.add_argument(
-    "--save_vid",
+    "--save-vid",
     action="store_true",
     default=False,
     help="Can be set to also generate .mp4 files of the processed event frames (default: %(default)s)",
