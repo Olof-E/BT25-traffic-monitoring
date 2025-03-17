@@ -33,6 +33,7 @@ def split_video(fpath, output_dir, length, num_of_clips):
         position=0,
         leave=False,
         mininterval=0.25,
+        miniters=50,
     ) as t:
         for _ in t:
             ret, frame = cap.read()
