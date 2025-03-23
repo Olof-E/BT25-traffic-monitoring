@@ -120,3 +120,6 @@ split_video(args.filename, args.output_dir, args.length, args.clips_count)
 
 
 # yolo track model="yolo/yolo12n.pt" source="2-08/_0-area.mp4" conf=0.3, iou=0.8 project="yolo/results/" save_txt=False device="cuda:0" batch=128 half verbose=False stream_buffer=True augment=True agnostic_nms=True
+
+
+# yolo track model="yolo/yolo12s.pt" source="2-08/_2.mp4" conf=0.3, iou=0.7 project="yolo/results/" save_txt=True device="cuda:0" batch=128 half verbose=False stream_buffer=False augment=False agnostic_nms=False tracker="yolo/botsort.yaml"

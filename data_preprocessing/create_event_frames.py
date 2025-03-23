@@ -28,7 +28,7 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
     event_buffer, read_from, last_time_high = event_streamer_c.c_fill_event_buffer(
         2_000, read_from, last_time_high
     )
-    df_timestamps = pd.read_csv("timestamps.csv", nrows=27000)
+    df_timestamps = pd.read_csv("timestamps.csv")
 
     time_windows0 = df_timestamps.iloc[:, 0].to_numpy()
     time_windows1 = df_timestamps.iloc[:, 1].to_numpy()
@@ -39,17 +39,13 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
 
     total_runtime = 0
     event_idx = 0
-    # Convert ms bin size to us
-    frame_bin = bin_size * 1000
-    frist_event = 0
+    last_time_window = 0
 
     curr_evt = event_buffer[event_idx]
-    first_event = curr_evt.timestamp
     event_idx += 1
 
     for clip_nr in range(num_of_clips):
         frames = []
-        # while start < 1000:
 
         start_time = time.time()
         with tqdm(
@@ -62,9 +58,9 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
             unit=" frames",
         ) as t_proc:
             for i in t_proc:
-
-                start = time_windows10[i]
-                end = time_windows10[i + 1]
+                start = time_windows10[last_time_window]
+                end = time_windows10[last_time_window + 1]
+                last_time_window += 1
 
                 frame = np.zeros((frame_height, frame_width))
                 while curr_evt and (curr_evt.timestamp - time_windows0[0]) < end:
