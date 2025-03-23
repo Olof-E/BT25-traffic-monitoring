@@ -12,36 +12,26 @@ from skimage import color, exposure, feature, filters, transform, util
 visualize = False
 
 
-def manhattan(a, b):
-    return sum(abs(val1 - val2) for val1, val2 in zip(a, b))
-
-
-weigths = []
-
-
 def calc_matrix(event_path, normal_path):
     model_matches = 0
     total_error = 0
-    cap = cv2.VideoCapture(event_path)
+    event_cap = cv2.VideoCapture(event_path)
 
-    cap2 = cv2.VideoCapture(normal_path)
+    normal_cap = cv2.VideoCapture(normal_path)
+
     matches = []
     for i in tqdm(
-        range(0, 5000, 50),
+        range(0, 5000, 100),
         ncols=90,
         mininterval=0.75,
     ):
-        cap.set(1, 1 + i)
-        cap2.set(1, 0 + i)
-        ret, img_left2 = cap.read()  # Read the Event frame
-        ret, img_right = cap2.read()  # Read the Normal frame
-        ret, img_right2 = cap2.read()  # Read the Normal frame
+        event_cap.set(1, 1 + i)
+        normal_cap.set(1, 0 + i)
+        ret, img_left2 = event_cap.read()  # Read the Event frame
+        ret, img_right = normal_cap.read()  # Read the Normal frame
+        ret, img_right2 = normal_cap.read()  # Read the Normal frame
 
         img_left = exposure.adjust_gamma(filters.gaussian(color.rgb2gray(img_left2), 10), 5)
-        # img_left = skimage.exposure.rescale_intensity(
-        #     denoise_tv_chambolle(rgb2gray(img_left2), weight=2000, max_num_iter=100),
-        #     out_range=(0, 255),
-        # )
 
         img_right = exposure.adjust_gamma(
             filters.gaussian(
@@ -121,61 +111,48 @@ def calc_matrix(event_path, normal_path):
         if visualize:
             plt.tight_layout()
             plt.show()
-    cap.release()
-    cap2.release()
+    event_cap.release()
+    normal_cap.release()
 
     matches = np.array(matches)
     model = transform.SimilarityTransform()
+    weight = 0
     if len(matches) > 4:
         model.estimate(matches[:, 0], matches[:, 1])
-        weigths.append(0.3 * model_matches + 0.7 * (model_matches - total_error * 10))
-    else:
-        weigths.append(0)
+        weight = 0.3 * model_matches + 0.7 * (model_matches - total_error * 10)
 
     print(repr(model.inverse.params))
-    return model
+    return model, weight
 
 
-# model1 = calc_matrix("clips/events/event_clip_2.mp4", "2-08/_2.mp4")
-# model2 = calc_matrix("clips/events/event_clip_3.mp4", "2-08/_3.mp4")
-# model3 = calc_matrix("clips/events/event_clip_4.mp4", "2-08/_4.mp4")
-# model4 = calc_matrix("clips/events/event_clip_5.mp4", "2-08/_5.mp4")
-# model5 = calc_matrix("clips/events/event_clip_6.mp4", "2-08/_6.mp4")
-# model6 = calc_matrix("clips/events/event_clip_7.mp4", "2-08/_7.mp4")
+models = []
+weights = []
+for i in range(2, 8):
+    model, weight = calc_matrix(f"clips/events/event_clip_{i}.mp4", f"2-08/_{i}.mp4")
+    models.append(model.params)
+    weights.append(weight)
 
+models = np.array(models)
+weights = np.array(weights)
 
-# weigths = np.array(weigths)
-# weigths = weigths / weigths.sum()
-# print(repr(weigths))
+weights = weights / weights.sum()
+
 model = transform.SimilarityTransform()
-# model.params = np.average(
-#     np.array(
-#         [model1.params, model2.params, model3.params, model4.params, model5.params, model6.params]
-#     ),
-#     axis=0,
-#     weights=weigths,
-# )
-model.params = np.array(
-    [
-        [1.17677564e00, -1.34534040e-02, -1.42088472e02],
-        [1.34534040e-02, 1.17677564e00, -8.44654080e01],
-        [0.00000000e00, 0.00000000e00, 1.00000000e00],
-    ]
+model.params = np.average(
+    models,
+    axis=0,
+    weights=weights,
 )
-model.params = model.inverse.params
-
 
 print(repr(model.inverse.params))
 
+event_cap = cv2.VideoCapture("clips/events/event_clip_2.mp4")
+normal_cap = cv2.VideoCapture("2-08/_2.mp4")
 
-cap = cv2.VideoCapture("clips/events/event_clip_2.mp4")  # video_name is the video being called
-cap2 = cv2.VideoCapture("2-08/_2.mp4")  # video_name is the video being called
-
-
-cap.set(1, 3690)
-cap2.set(1, 3690)
-ret, img_left = cap.read()  # Read the frame
-ret, img_right = cap2.read()  # Read the frame
+event_cap.set(1, 3690)
+normal_cap.set(1, 3690)
+ret, img_left = event_cap.read()
+ret, img_right = normal_cap.read()
 
 target_tensor = None
 
@@ -196,7 +173,9 @@ axes[1].imshow(img_right, cmap="brg")
 
 
 for t in range(len(target_tensor)):
+    # ===========================
     # Event Image
+    # ===========================
     center_x, center_y = target_tensor[t][:2].numpy() * [736, 460]
     w, h = target_tensor[t][2:].numpy() * [736, 460]
 
@@ -215,7 +194,9 @@ for t in range(len(target_tensor)):
     axes[0].add_patch(rect)
     axes[0].add_patch(cirk)
 
+    # ===========================
     # Normal Image
+    # ===========================
     center_x, center_y = target_tensor[t][:2].numpy() * [736, 460]
     w, h = target_tensor[t][2:].numpy() * [736, 460]
 
@@ -231,5 +212,5 @@ plt.tight_layout()
 plt.show()
 
 
-cap.release()
-cap2.release()
+event_cap.release()
+normal_cap.release()
