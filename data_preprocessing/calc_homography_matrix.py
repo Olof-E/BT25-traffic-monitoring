@@ -9,40 +9,18 @@ from matplotlib import patches
 from skimage import color, exposure, feature, filters, transform, util
 
 
-visualize = False
-
-
-"""
-data = torch.load("clips/events/event_frames_2.pt")
-event_cap = cv2.VideoCapture("clips/events/event_clip_2.mp4")
-
-event_cap.set(1, 3690)
-ret, img_left = event_cap.read()
-
-plt.figure("pt")
-plt.imshow(data[3690].to_dense(), cmap="gray")
-
-plt.figure("video")
-plt.imshow(img_left)
-
-plt.show()
-exit()
-
-for frame_idx in tqdm(range(int(len(data)))):
-    frame = data[frame_idx].to_dense()
-
-"""
-
-
-def calc_matrix(event_path, normal_path):
+visualize = True
+def process_clip(event_path, normal_path):
     torch.cuda.set_device(device=0)
     model_matches = 0
     total_error = 0
     event_data = torch.load(event_path)
 
     normal_cap = cv2.VideoCapture(normal_path)
+    
 
     matches = []
+    frames = []
     for i in tqdm(
         range(0, 5000, 100),
         ncols=90,
@@ -77,9 +55,9 @@ def calc_matrix(event_path, normal_path):
 
         if visualize:
             fig, axes = plt.subplots(1, 2, figsize=(12, 8))
-
+            
             axes[0].imshow(img_left, cmap="magma")
-            axes[1].imshow(img_right, cmap="magma")
+            axes[1].imshow(img_right, cmap="magma", extent=(0, 736, 460, 0))
 
             for y1, x1, r1 in blobs1:
                 cirk1 = patches.Circle((x1, y1), radius=r1, linewidth=2, edgecolor="r", fill=False)
@@ -131,8 +109,13 @@ def calc_matrix(event_path, normal_path):
                     axes[1].add_patch(cirk2)
 
         if visualize:
-            plt.tight_layout()
-            plt.show()
+            axes[0].axis("off")
+            axes[1].axis("off")
+            fig.tight_layout()
+            fig.savefig(f"clips/test/{i}.png", bbox_inches="tight", pad_inches=0)
+            
+            plt.close(fig)
+                       
     normal_cap.release()
 
     matches = np.array(matches)
@@ -143,29 +126,35 @@ def calc_matrix(event_path, normal_path):
         weight = 0.3 * model_matches + 0.7 * (model_matches - total_error * 10)
 
     print(repr(model.inverse.params))
+    
     return model, weight
 
 
-models = []
-weights = []
-for i in range(2, 8):
-    model, weight = calc_matrix(f"clips/events/event_frames_{i}.pt", f"2-08/_{i}.mp4")
-    models.append(model.params)
-    weights.append(weight)
 
-models = np.array(models)
-weights = np.array(weights)
+def calc_matrix(event_folder, normal_folder, start_clip, end_clip):
+    
+    models = []
+    weights = []
+    for i in range(start_clip, end_clip+1):
+        model, weight = process_clip(f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4")
+        models.append(model.params)
+        weights.append(weight)
 
-weights = weights / weights.sum()
+    models = np.array(models)
+    weights = np.array(weights)
 
-model = transform.SimilarityTransform()
-model.params = np.average(
-    models,
-    axis=0,
-    weights=weights,
-)
+    weights = weights / weights.sum()
 
-print(repr(model.inverse.params))
+    model = transform.SimilarityTransform()
+    model.params = np.average(
+        models,
+        axis=0,
+        weights=weights,
+    )
+    
+    return model
+
+model = calc_matrix("clips/events/", "2-08/", 2, 2)
 
 event_data = torch.load("clips/events/event_frames_2.pt")
 
@@ -185,7 +174,6 @@ with open(os.path.join("./yolo/results/track2/labels", "_2_3690.txt")) as file:
         for value in line.split()[1:5]
     ]
     target_tensor = torch.tensor(target_data, dtype=torch.float16).view(-1, 4)
-    print(repr(target_tensor))
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 8))
 
@@ -228,10 +216,11 @@ for t in range(len(target_tensor)):
     cirk = patches.Circle((center_x, center_y), radius=1, edgecolor="r", facecolor="red")
     axes[1].add_patch(rect)
     axes[1].add_patch(cirk)
+    
+    
 
 plt.tight_layout()
 plt.show()
 
 
-event_cap.release()
 normal_cap.release()
