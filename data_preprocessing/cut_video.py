@@ -35,6 +35,7 @@ def split_video(fpath, output_dir, length, num_of_clips):
         mininterval=0.25,
         miniters=50,
     ) as t:
+        start_time = time.time()
         for _ in t:
             ret, frame = cap.read()
             if not ret:
@@ -49,9 +50,12 @@ def split_video(fpath, output_dir, length, num_of_clips):
                 if save_thread and save_thread.is_alive():
                     save_thread.join()
 
+                proc_time = time.time() - start_time
+                start_time = time.time()
+
                 save_thread = Thread(
                     target=save_clip,
-                    args=[frames.copy(), output_dir, current_clip, num_of_clips, fps],
+                    args=[frames.copy(), output_dir, current_clip, num_of_clips, fps, proc_time],
                 )
                 save_thread.start()
 
@@ -63,13 +67,10 @@ def split_video(fpath, output_dir, length, num_of_clips):
     cap.release()
     if save_thread and save_thread.is_alive():
         save_thread.join()
-        tqdm.write(
-            f"\nFinished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(t.format_dict['elapsed']))}\x1b[22m"
-        )
-        tqdm.write(f"Clips saved to: \x1b[1m{output_dir}\x1b[22m")
 
 
-def save_clip(frames, output_dir, current_clip, num_of_clips, fps):
+def save_clip(frames, output_dir, current_clip, num_of_clips, fps, proc_time):
+    start_time = time.time()
     out = cv2.VideoWriter(
         f"{output_dir}_{current_clip}.mp4",
         cv2.VideoWriter_fourcc(*"mp4v"),
@@ -86,6 +87,11 @@ def save_clip(frames, output_dir, current_clip, num_of_clips, fps):
         out.write(f)
 
     out.release()
+    save_time = time.time() - start_time
+
+    tqdm.write(
+        f"Clip {current_clip+1}/{num_of_clips} [\x1b[92m\u2714\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time+save_time))}\x1b[22m\n"
+    )
 
 
 parser = argparse.ArgumentParser(
@@ -112,9 +118,14 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-
+start_time = time.time()
 split_video(args.filename, args.output_dir, args.length, args.clips_count)
 
+total_runtime = time.time() - start_time
+
+print("=================================================")
+print(f"\nFinished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(total_runtime))}\x1b[22m")
+print(f"Clips saved to: \x1b[1m{args.output_dir}\x1b[22m")
 
 # yolo track model="yolo/yolo11n.pt" source="2-08/_8.mp4" conf=0.3, iou=0.35 project="yolo/results/" save_txt=true device="cuda:0" batch=64 half verbose=False
 
