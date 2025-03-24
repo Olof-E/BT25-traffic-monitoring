@@ -1,6 +1,5 @@
 import argparse
 import time
-from tracemalloc import start
 import cv2
 import pandas as pd
 import torch

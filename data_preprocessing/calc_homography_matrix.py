@@ -12,10 +12,33 @@ from skimage import color, exposure, feature, filters, transform, util
 visualize = False
 
 
+"""
+data = torch.load("clips/events/event_frames_2.pt")
+event_cap = cv2.VideoCapture("clips/events/event_clip_2.mp4")
+
+event_cap.set(1, 3690)
+ret, img_left = event_cap.read()
+
+plt.figure("pt")
+plt.imshow(data[3690].to_dense(), cmap="gray")
+
+plt.figure("video")
+plt.imshow(img_left)
+
+plt.show()
+exit()
+
+for frame_idx in tqdm(range(int(len(data)))):
+    frame = data[frame_idx].to_dense()
+
+"""
+
+
 def calc_matrix(event_path, normal_path):
+    torch.cuda.set_device(device=0)
     model_matches = 0
     total_error = 0
-    event_cap = cv2.VideoCapture(event_path)
+    event_data = torch.load(event_path)
 
     normal_cap = cv2.VideoCapture(normal_path)
 
@@ -25,13 +48,12 @@ def calc_matrix(event_path, normal_path):
         ncols=90,
         mininterval=0.75,
     ):
-        event_cap.set(1, 1 + i)
         normal_cap.set(1, 0 + i)
-        ret, img_left2 = event_cap.read()  # Read the Event frame
+        img_left2 = event_data[i + 1].to_dense()  # Read the Event frame
         ret, img_right = normal_cap.read()  # Read the Normal frame
         ret, img_right2 = normal_cap.read()  # Read the Normal frame
 
-        img_left = exposure.adjust_gamma(filters.gaussian(color.rgb2gray(img_left2), 10), 5)
+        img_left = exposure.adjust_gamma(filters.gaussian(img_left2, 10), 5)
 
         img_right = exposure.adjust_gamma(
             filters.gaussian(
@@ -47,10 +69,10 @@ def calc_matrix(event_path, normal_path):
         img_right = exposure.rescale_intensity(img_right)
 
         blobs1 = feature.blob_doh(
-            img_left, min_sigma=12, max_sigma=32, num_sigma=6, threshold_rel=0.45
+            img_left, min_sigma=12, max_sigma=32, num_sigma=3, threshold_rel=0.45
         )
         blobs2 = feature.blob_doh(
-            img_right, min_sigma=12, max_sigma=32, num_sigma=6, threshold_rel=0.55
+            img_right, min_sigma=12, max_sigma=32, num_sigma=3, threshold_rel=0.55
         )
 
         if visualize:
@@ -111,7 +133,6 @@ def calc_matrix(event_path, normal_path):
         if visualize:
             plt.tight_layout()
             plt.show()
-    event_cap.release()
     normal_cap.release()
 
     matches = np.array(matches)
@@ -128,7 +149,7 @@ def calc_matrix(event_path, normal_path):
 models = []
 weights = []
 for i in range(2, 8):
-    model, weight = calc_matrix(f"clips/events/event_clip_{i}.mp4", f"2-08/_{i}.mp4")
+    model, weight = calc_matrix(f"clips/events/event_frames_{i}.pt", f"2-08/_{i}.mp4")
     models.append(model.params)
     weights.append(weight)
 
@@ -146,12 +167,12 @@ model.params = np.average(
 
 print(repr(model.inverse.params))
 
-event_cap = cv2.VideoCapture("clips/events/event_clip_2.mp4")
+event_data = torch.load("clips/events/event_frames_2.pt")
+
 normal_cap = cv2.VideoCapture("2-08/_2.mp4")
 
-event_cap.set(1, 3690)
 normal_cap.set(1, 3690)
-ret, img_left = event_cap.read()
+img_left = event_data[3690].to_dense()
 ret, img_right = normal_cap.read()
 
 target_tensor = None
@@ -168,7 +189,7 @@ with open(os.path.join("./yolo/results/track2/labels", "_2_3690.txt")) as file:
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 8))
 
-axes[0].imshow(img_left, cmap="brg")
+axes[0].imshow(img_left, cmap="gray")
 axes[1].imshow(img_right, cmap="brg")
 
 
