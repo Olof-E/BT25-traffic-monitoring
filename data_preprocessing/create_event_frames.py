@@ -1,14 +1,12 @@
 import argparse
-from ast import arg
-import sys
 import time
 import cv2
-import numpy as np
-from sklearn.preprocessing import minmax_scale
+import pandas as pd
 import torch
+import numpy as np
 from tqdm import tqdm
-
-from event_streamer import EventStream
+from sklearn.preprocessing import minmax_scale
+import event_streamer_c
 
 cuda_device = 0
 decay_rate = 0.0002
@@ -17,44 +15,73 @@ frame_height = 480
 
 decay = False  # set true to add decay to the input events
 
+fps = 90
+
 
 def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids):
     torch.cuda.set_device(device=cuda_device)
 
-    stream = EventStream(fpath)
+    # stream = EventStream(fpath)
+    read_from = 239
+    last_time_high = 0
+    event_buffer, read_from, last_time_high = event_streamer_c.c_fill_event_buffer(
+        2_000, read_from, last_time_high
+    )
+    df_timestamps = pd.read_csv("timestamps.csv")
+
+    time_windows0 = df_timestamps.iloc[:, 0].to_numpy()
+    time_windows1 = df_timestamps.iloc[:, 1].to_numpy()
+    time_windows = time_windows1 - time_windows1[0]
+    time_windows10 = time_windows0 - time_windows0[0]
+    print(time_windows10)
+    print(time_windows)
 
     total_runtime = 0
+    event_idx = 0
+    last_time_window = 0
+
+    curr_evt = event_buffer[event_idx]
+    event_idx += 1
 
     for clip_nr in range(num_of_clips):
         frames = []
 
-        curr_evt = stream.read()
-        start = curr_evt.timestamp
-
+        start_time = time.time()
         with tqdm(
-            range(clip_length * 100),
+            range(clip_length * fps),
             ncols=86,
             desc=f"processing clip {clip_nr+1}/{num_of_clips}",
             leave=False,
+            mininterval=0.25,
+            miniters=50,
             unit=" frames",
         ) as t_proc:
-            for _ in t_proc:
-                frame = np.zeros((frame_height, frame_width))
-                while curr_evt and (curr_evt.timestamp - start) < bin_size * 1000:
-                    time_since_start = curr_evt.timestamp - start
+            for i in t_proc:
+                start = time_windows10[last_time_window]
+                end = time_windows10[last_time_window + 1]
+                last_time_window += 1
 
+                frame = np.zeros((frame_height, frame_width))
+                while curr_evt and (curr_evt.timestamp - time_windows0[0]) < end:
                     decay_multiplier = 1
                     if decay:  # add decay rate if desired
+                        time_since_start = curr_evt.timestamp - start
                         decay_multiplier = np.exp(-(time_since_start * decay_rate))
+
                     frame[curr_evt.y, curr_evt.x] = curr_evt.polarity * decay_multiplier
 
-                    curr_evt = stream.read()
+                    if event_idx >= len(event_buffer):
+                        event_buffer, read_from, last_time_high = (
+                            event_streamer_c.c_fill_event_buffer(2_000, read_from, last_time_high)
+                        )
+                        event_idx = 0
+                    curr_evt = event_buffer[event_idx]
+                    event_idx += 1
 
                 if not curr_evt:
                     print("Stream end reached. current clip processing aborted...")
                     exit(0)
 
-                start = curr_evt.timestamp
                 frames.append(torch.tensor(frame).to_sparse())
 
         print(f"Clip {clip_nr+1}/{num_of_clips}: saving...", end="\r")
@@ -66,7 +93,7 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
             out = cv2.VideoWriter(
                 f"{output_dir}event_clip_{clip_nr}.mp4",
                 cv2.VideoWriter_fourcc(*"mp4v"),
-                100,
+                fps,
                 (frame_width, frame_height),
                 False,
             )
@@ -76,6 +103,8 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
                 ncols=86,
                 desc=f"saving clip {clip_nr+1}/{num_of_clips}",
                 leave=False,
+                mininterval=0.25,
+                miniters=50,
                 unit=" frames",
             ) as t_save:
                 for i in t_save:
@@ -87,12 +116,12 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
             out.release()
 
         print(end="\x1b[2K")
-        proc_time = time.strftime(
-            "%Mm %Ss", time.gmtime(t_proc.format_dict["elapsed"] + t_save.format_dict["elapsed"])
+        proc_time = time.time() - start_time
+        print(
+            f"Clip {clip_nr+1}/{num_of_clips} [\x1b[92m\u2714\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time))}\x1b[22m\n"
         )
-        print(f"Clip {clip_nr+1}/{num_of_clips} [\x1b[92m\u2714\x1b[0m] Finished in {proc_time}\n")
 
-        total_runtime += t_proc.format_dict["elapsed"] + t_save.format_dict["elapsed"]
+        total_runtime += proc_time
 
     print("==========================================")
     print(f"Processing finished in {time.strftime('%Mm %Ss', time.gmtime(total_runtime))}")
@@ -125,12 +154,12 @@ parser.add_argument(
 parser.add_argument(
     "-b",
     "--bin",
-    default=10,
-    type=int,
+    default=10.0,
+    type=float,
     help="The desired bin size for the event frames in milliseconds (default: %(default)s ms)",
 )
 parser.add_argument(
-    "--save_vid",
+    "--save-vid",
     action="store_true",
     default=False,
     help="Can be set to also generate .mp4 files of the processed event frames (default: %(default)s)",
