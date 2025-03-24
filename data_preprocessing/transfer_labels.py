@@ -12,8 +12,8 @@ import os
 
 """
 
-torch.cuda.set_device(3)
-nr = 1
+torch.cuda.set_device(0)
+nr = 0
 
 
 def get_targets(directory, target_length):
@@ -27,7 +27,7 @@ def get_targets(directory, target_length):
                 if line.strip().split()[0] in ("2", "5", "7", "61")
                 for value in line.split()[1:5]
             ]
-            target_tensor = torch.tensor(target_data, dtype=torch.float).view(-1, 4)
+            target_tensor = torch.tensor(target_data, dtype=torch.float16).view(-1, 4)
             target_tensors[int(filename[3:-4]) - 1] = target_tensor
 
     return target_tensors
@@ -51,10 +51,10 @@ def leaky_integrator(input_data, tau, v):
     return v_next
 
 
-def annotate_frame(frame, targets, i, overlay):
+def annotate_frame(frame, targets, frame_idx, overlay):
     global max_value
     fig, axes = plt.subplots(1, 2, figsize=(20, 20))
-    x_min, y_min, x_max, y_max = (50, 50, 250, 250)
+    x_min, y_min, x_max, y_max = (0, 50, 200, 250)
     axes[0].imshow(frame[y_min:y_max, x_min:x_max], cmap="gray")
     small_frame_dim = 64
     G_overlay = np.zeros((small_frame_dim, small_frame_dim))
@@ -113,20 +113,24 @@ def annotate_frame(frame, targets, i, overlay):
     if torch.max(G_overlay) > max_value:
         max_value = torch.max(G_overlay)
 
-    overlay = leaky_integrator(torch.tensor(G_overlay), tau=10, v=torch.tensor(overlay))
+    overlay = leaky_integrator(
+        G_overlay.detach().clone(),
+        tau=10,
+        v=overlay.detach().clone(),
+    )
     axes[1].imshow(overlay, cmap="hot", extent=(0, 64, 64, 0), vmin=0, vmax=0.03)
 
     axes[0].axis("off")
     axes[1].axis("off")
     fig.tight_layout()
-    fig.savefig(f"forlabeltransfer/{i}.png", bbox_inches="tight", pad_inches=0)
+    fig.savefig(f"forlabeltransfer/{frame_idx}.png", bbox_inches="tight", pad_inches=0)
 
     plt.close(fig)
 
     x_min, y_min, x_max, y_max = (0, 50, 200, 250)
     return [
-        torch.tensor(frame[y_min:y_max, x_min:x_max]),
-        torch.tensor(overlay),
+        frame[y_min:y_max, x_min:x_max].detach().clone(),
+        overlay.detach().clone(),
     ], overlay
 
 
@@ -138,50 +142,43 @@ H = transform.estimate_transform(
 
 
 targets = get_targets(
-    f"yolo/result_{nr}/track/labels", 27000
+    f"../yolo/results/track/labels/", 27000
 )  # The hardcoded number causes a diff in the long run, needs to look into.
-i = 0
-j = 0
 frames_tensor = []
 label_tensor = []
 new_label = []
-data = torch.load(f"event_frames_{nr}.pt")
+data = torch.load(f"../clips/events/event_frames_{nr}.pt")
 small_frame_dim = 64
 max_value = 0
-overlay = np.zeros((small_frame_dim, small_frame_dim))
+overlay = torch.zeros((small_frame_dim, small_frame_dim))
 x_min, y_min, x_max, y_max = (0, 180, 300, 480)
 
-for frame_inx in tqdm(range(len(data))):
-    frame = data[frame_inx].to_dense()[y_min:y_max, x_min:x_max]
+for frame_idx in tqdm(range(int(len(data)))):
+    frame = data[frame_idx].to_dense()[y_min:y_max, x_min:x_max]
     warped = []
 
-    if targets[j] == None:
-        print("missing:", j)
-        res = [torch.tensor(frame[0:200, 0:200]), torch.tensor(np.zeros((64, 64)))]
+    if targets[frame_idx] == None:
+        print("missing:", frame_idx)
+        res = [frame[0:200, 0:200].detach().clone(), torch.zeros((64, 64))]
 
-    elif len(targets[j]) == 0:
-        res = [torch.tensor(frame[0:200, 0:200]), torch.tensor(np.zeros((64, 64)))]
+    elif len(targets[frame_idx]) == 0:
+        res = [frame[0:200, 0:200].detach().clone(), torch.zeros((64, 64))]
 
     else:
-        for tar in range(len(targets[j])):
+        for tar in range(len(targets[frame_idx])):
             transformed_coordinates = np.dot(
-                H, torch.concat((targets[j][tar][:2] * 299, torch.ones(1)))
+                H, torch.concat((targets[frame_idx][tar][:2] * 299, torch.ones(1)))
             )
             transformed_coordinates = transformed_coordinates[:2] / transformed_coordinates[2]
-            warped.append([transformed_coordinates, targets[j][tar][2:] * 299])
+            warped.append([transformed_coordinates, targets[frame_idx][tar][2:] * 299])
 
-        res, overlay = annotate_frame(frame, warped, i, overlay)
-
-    if i % 500 == 0:
-        print(i)
+        res, overlay = annotate_frame(frame, warped, frame_idx, overlay)
 
     frames_tensor.append(res[0])
     label_tensor.append(res[1])
 
-    i += 1
-    j += 1
 
 torch.save(
     [torch.stack(frames_tensor).to_sparse(), torch.stack(label_tensor).to_sparse()],
-    f"frames_with_labels/{nr}.pt",
+    f"../clips/frames_with_labels/{nr}.pt",
 )
