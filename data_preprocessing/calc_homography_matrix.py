@@ -1,4 +1,5 @@
 import os
+from threading import Thread
 import cv2
 import math
 import torch
@@ -10,19 +11,22 @@ from skimage import color, exposure, feature, filters, transform, util
 
 
 visualize = True
+
+img = 0
+
+
 def process_clip(event_path, normal_path):
+    global img
     torch.cuda.set_device(device=0)
     model_matches = 0
     total_error = 0
     event_data = torch.load(event_path)
 
     normal_cap = cv2.VideoCapture(normal_path)
-    
 
     matches = []
-    frames = []
     for i in tqdm(
-        range(0, 5000, 100),
+        range(0, 5000, 50),
         ncols=90,
         mininterval=0.75,
     ):
@@ -55,9 +59,9 @@ def process_clip(event_path, normal_path):
 
         if visualize:
             fig, axes = plt.subplots(1, 2, figsize=(12, 8))
-            
+
             axes[0].imshow(img_left, cmap="magma")
-            axes[1].imshow(img_right, cmap="magma", extent=(0, 736, 460, 0))
+            axes[1].imshow(img_right, cmap="magma")
 
             for y1, x1, r1 in blobs1:
                 cirk1 = patches.Circle((x1, y1), radius=r1, linewidth=2, edgecolor="r", fill=False)
@@ -112,10 +116,12 @@ def process_clip(event_path, normal_path):
             axes[0].axis("off")
             axes[1].axis("off")
             fig.tight_layout()
-            fig.savefig(f"clips/test/{i}.png", bbox_inches="tight", pad_inches=0)
-            
-            plt.close(fig)
-                       
+            plt.show()
+            # fig.savefig(f"clips/test/{img}.png", bbox_inches="tight", pad_inches=0.1)
+            # img += 1
+
+            # plt.close(fig)
+
     normal_cap.release()
 
     matches = np.array(matches)
@@ -125,18 +131,17 @@ def process_clip(event_path, normal_path):
         model.estimate(matches[:, 0], matches[:, 1])
         weight = 0.3 * model_matches + 0.7 * (model_matches - total_error * 10)
 
-    print(repr(model.inverse.params))
-    
     return model, weight
 
 
+def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results):
 
-def calc_matrix(event_folder, normal_folder, start_clip, end_clip):
-    
     models = []
     weights = []
-    for i in range(start_clip, end_clip+1):
-        model, weight = process_clip(f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4")
+    for i in range(start_clip, end_clip + 1):
+        model, weight = process_clip(
+            f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4"
+        )
         models.append(model.params)
         weights.append(weight)
 
@@ -151,10 +156,36 @@ def calc_matrix(event_folder, normal_folder, start_clip, end_clip):
         axis=0,
         weights=weights,
     )
-    
-    return model
 
-model = calc_matrix("clips/events/", "2-08/", 2, 2)
+    results.append(model.params)
+
+
+models = []
+
+if not visualize:
+    t = Thread(target=calc_matrix, args=["clips/events/", "2-08/", 4, 5, models])
+    t.start()
+
+    t1 = Thread(target=calc_matrix, args=["clips/events/", "2-08/", 6, 7, models])
+    t1.start()
+
+
+calc_matrix("clips/events/", "2-08/", 2, 3, models)
+
+if not visualize:
+    t.join()
+    t1.join()
+
+
+model = transform.SimilarityTransform()
+
+
+model.params = np.average(
+    models,
+    axis=0,
+    weights=[1 / len(models)] * len(models),
+)
+
 
 event_data = torch.load("clips/events/event_frames_2.pt")
 
@@ -216,8 +247,7 @@ for t in range(len(target_tensor)):
     cirk = patches.Circle((center_x, center_y), radius=1, edgecolor="r", facecolor="red")
     axes[1].add_patch(rect)
     axes[1].add_patch(cirk)
-    
-    
+
 
 plt.tight_layout()
 plt.show()
