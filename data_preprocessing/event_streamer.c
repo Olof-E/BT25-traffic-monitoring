@@ -20,7 +20,7 @@ unsigned int mask_6b = 0x3F;
 unsigned int mask_11b = 0x7FF;
 unsigned int mask_28b = 0xFFFFFFF;
 
-void read_window(int *read_from, long *time_high, Event *event_buffer,
+void read_window(long *read_from, long *time_high, Event *event_buffer,
                  int event_buffer_size) {
 
     FILE *file_handle = fopen("events.raw", "rb");

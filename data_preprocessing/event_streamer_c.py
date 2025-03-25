@@ -13,7 +13,7 @@ class Event(Structure):
 
 
 event_lib.read_window.argtypes = (
-    POINTER(c_int),
+    POINTER(c_long),
     POINTER(c_long),
     POINTER(Event),
     c_int,
@@ -27,7 +27,7 @@ event_lib.read_window.restype = c_void_p
 
 def c_fill_event_buffer(buffer_size, last_read_from, last_time_high):
     buffer = (Event * buffer_size)(*[])
-    read_from = c_int(last_read_from)
+    read_from = c_long(last_read_from)
     time_high = c_long(last_time_high)
     event_lib.read_window(byref(read_from), byref(time_high), buffer, buffer_size)
 
