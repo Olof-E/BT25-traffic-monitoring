@@ -1,4 +1,5 @@
 import argparse
+from threading import Thread
 import time
 import cv2
 import pandas as pd
@@ -18,23 +19,18 @@ decay = False  # set true to add decay to the input events
 fps = 90
 
 
-def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids):
+def bin_events(fpath, output_dir, clip_length, num_of_clips, save_vids):
     torch.cuda.set_device(device=cuda_device)
 
-    # stream = EventStream(fpath)
     read_from = 239
     last_time_high = 0
     event_buffer, read_from, last_time_high = event_streamer_c.c_fill_event_buffer(
-        2_000, read_from, last_time_high
+        4_000, read_from, last_time_high
     )
     df_timestamps = pd.read_csv("timestamps.csv")
 
     time_windows0 = df_timestamps.iloc[:, 0].to_numpy()
-    time_windows1 = df_timestamps.iloc[:, 1].to_numpy()
-    time_windows = time_windows1 - time_windows1[0]
     time_windows10 = time_windows0 - time_windows0[0]
-    print(time_windows10)
-    print(time_windows)
 
     total_runtime = 0
     event_idx = 0
@@ -42,6 +38,8 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
 
     curr_evt = event_buffer[event_idx]
     event_idx += 1
+
+    save_thread = None
 
     for clip_nr in range(num_of_clips):
         frames = []
@@ -63,16 +61,31 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
 
                 frame = np.zeros((frame_height, frame_width))
                 while curr_evt and (curr_evt.timestamp - time_windows0[0]) < end:
+                    if not (
+                        curr_evt.x >= 0
+                        and curr_evt.x < 640
+                        and curr_evt.y >= 0
+                        and curr_evt.y < 480
+                    ):
+                        tqdm.write("malformed event read")
+                        tqdm.write(f"Byte location: {read_from}")
+
                     decay_multiplier = 1
                     if decay:  # add decay rate if desired
                         time_since_start = curr_evt.timestamp - start
                         decay_multiplier = np.exp(-(time_since_start * decay_rate))
 
-                    frame[curr_evt.y, curr_evt.x] = curr_evt.polarity * decay_multiplier
+                    if (
+                        curr_evt.x >= 0
+                        and curr_evt.x < 640
+                        and curr_evt.y >= 0
+                        and curr_evt.y < 480
+                    ):
+                        frame[curr_evt.y, curr_evt.x] = curr_evt.polarity * decay_multiplier
 
                     if event_idx >= len(event_buffer):
                         event_buffer, read_from, last_time_high = (
-                            event_streamer_c.c_fill_event_buffer(2_000, read_from, last_time_high)
+                            event_streamer_c.c_fill_event_buffer(4_000, read_from, last_time_high)
                         )
                         event_idx = 0
                     curr_evt = event_buffer[event_idx]
@@ -84,48 +97,63 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, bin_size, save_vids
 
                 frames.append(torch.tensor(frame).to_sparse())
 
-        print(f"Clip {clip_nr+1}/{num_of_clips}: saving...", end="\r")
-
         filename = f"{output_dir}event_frames_{clip_nr}.pt"
         torch.save(torch.stack(frames), filename)
 
-        if save_vids:
-            out = cv2.VideoWriter(
-                f"{output_dir}event_clip_{clip_nr}.mp4",
-                cv2.VideoWriter_fourcc(*"mp4v"),
-                fps,
-                (frame_width, frame_height),
-                False,
-            )
-            shape = frames[0].shape
-            with tqdm(
-                range(len(frames)),
-                ncols=86,
-                desc=f"saving clip {clip_nr+1}/{num_of_clips}",
-                leave=False,
-                mininterval=0.25,
-                miniters=50,
-                unit=" frames",
-            ) as t_save:
-                for i in t_save:
-                    image_scaled = minmax_scale(
-                        frames[i].to_dense().numpy().ravel(), feature_range=(0, 255), copy=False
-                    ).reshape(shape)
-                    out.write(np.uint8(image_scaled))
-
-            out.release()
-
-        print(end="\x1b[2K")
         proc_time = time.time() - start_time
-        print(
-            f"Clip {clip_nr+1}/{num_of_clips} [\x1b[92m\u2714\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time))}\x1b[22m\n"
-        )
-
+        if save_vids:
+            if save_thread and save_thread.is_alive():
+                save_thread.join()
+            save_thread = Thread(
+                target=save_clip,
+                args=[frames.copy(), output_dir, clip_nr, num_of_clips, fps, proc_time],
+            )
+            save_thread.start()
+        else:
+            tqdm.write(
+                f"Clip {clip_nr+1}/{num_of_clips} [\x1b[92m\u2714\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time))}\x1b[22m\n"
+            )
         total_runtime += proc_time
 
+    if save_thread and save_thread.is_alive():
+        save_thread.join()
+
     print("==========================================")
-    print(f"Processing finished in {time.strftime('%Mm %Ss', time.gmtime(total_runtime))}")
-    print(f"Data saved to {output_dir}")
+    print(
+        f"Processing finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(total_runtime))}\x1b[22m"
+    )
+    print(f"Data saved to \x1b[1m{output_dir}\x1b[22m")
+
+
+def save_clip(frames, output_dir, current_clip, num_of_clips, fps, proc_time):
+    start_time = time.time()
+    out = cv2.VideoWriter(
+        f"{output_dir}event_clip_{current_clip}.mp4",
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (frame_width, frame_height),
+        False,
+    )
+
+    shape = frames[0].shape
+    for f in tqdm(
+        frames,
+        desc=f"saving clip {current_clip+1}/{num_of_clips}",
+        ncols=86,
+        mininterval=0.25,
+        leave=False,
+    ):
+        image_scaled = minmax_scale(
+            f.to_dense().numpy().ravel(), feature_range=(0, 255), copy=False
+        ).reshape(shape)
+        out.write(np.uint8(image_scaled))
+
+    out.release()
+    save_time = time.time() - start_time
+
+    tqdm.write(
+        f"\nClip {current_clip+1}/{num_of_clips} [\x1b[92m\u2714\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time+save_time))}\x1b[22m\n"
+    )
 
 
 parser = argparse.ArgumentParser(
@@ -152,13 +180,6 @@ parser.add_argument(
     help="The desired length of the clips in seconds (default: %(default)s s)",
 )
 parser.add_argument(
-    "-b",
-    "--bin",
-    default=10.0,
-    type=float,
-    help="The desired bin size for the event frames in milliseconds (default: %(default)s ms)",
-)
-parser.add_argument(
     "--save-vid",
     action="store_true",
     default=False,
@@ -167,4 +188,4 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-bin_events(args.filename, args.output_dir, args.length, args.clips_count, args.bin, args.save_vid)
+bin_events(args.filename, args.output_dir, args.length, args.clips_count, args.save_vid)
