@@ -25,9 +25,9 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, save_vids):
     read_from = 239
     last_time_high = 0
     event_buffer, read_from, last_time_high = event_streamer_c.c_fill_event_buffer(
-        4_000, read_from, last_time_high
+        f"{fpath}/events.raw", 4_000, read_from, last_time_high
     )
-    df_timestamps = pd.read_csv("timestamps.csv")
+    df_timestamps = pd.read_csv(f"{fpath}/timestamps.csv")
 
     time_windows0 = df_timestamps.iloc[:, 0].to_numpy()
     time_windows10 = time_windows0 - time_windows0[0]
@@ -61,15 +61,6 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, save_vids):
 
                 frame = np.zeros((frame_height, frame_width))
                 while curr_evt and (curr_evt.timestamp - time_windows0[0]) < end:
-                    if not (
-                        curr_evt.x >= 0
-                        and curr_evt.x < 640
-                        and curr_evt.y >= 0
-                        and curr_evt.y < 480
-                    ):
-                        tqdm.write("malformed event read")
-                        tqdm.write(f"Byte location: {read_from}")
-
                     decay_multiplier = 1
                     if decay:  # add decay rate if desired
                         time_since_start = curr_evt.timestamp - start
@@ -85,7 +76,9 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, save_vids):
 
                     if event_idx >= len(event_buffer):
                         event_buffer, read_from, last_time_high = (
-                            event_streamer_c.c_fill_event_buffer(4_000, read_from, last_time_high)
+                            event_streamer_c.c_fill_event_buffer(
+                                f"{fpath}/events.raw", 4_000, read_from, last_time_high
+                            )
                         )
                         event_idx = 0
                     curr_evt = event_buffer[event_idx]

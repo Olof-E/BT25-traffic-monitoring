@@ -20,10 +20,10 @@ unsigned int mask_6b = 0x3F;
 unsigned int mask_11b = 0x7FF;
 unsigned int mask_28b = 0xFFFFFFF;
 
-void read_window(long *read_from, long *time_high, Event *event_buffer,
-                 int event_buffer_size) {
+void read_window(const char *fpath, long *read_from, long *time_high,
+                 Event *event_buffer, int event_buffer_size) {
 
-    FILE *file_handle = fopen("events.raw", "rb");
+    FILE *file_handle = fopen(fpath, "rb");
 
     unsigned char buffer[CHUNK_SIZE];
 
