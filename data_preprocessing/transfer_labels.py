@@ -70,21 +70,28 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
 
         center_x, center_y = targets[t][1] - [roi[0], roi[1]]
         w, h = targets[t][2]
-        if class_type == 5:
-            tqdm.write("BUSS FOUND I REPEAT BUSS FOUND!!!!!!!!!!!")
-            tqdm.write(f"x: {center_x}")
-            tqdm.write(f"y: {center_y}")
-            tqdm.write(f"w: {w}")
-            tqdm.write(f"h: {h}")
+        # if class_type == 5:
+        #     tqdm.write("BUSS FOUND I REPEAT BUSS FOUND!!!!!!!!!!!")
+        #     tqdm.write(f"x: {center_x}")
+        #     tqdm.write(f"y: {center_y}")
+        #     tqdm.write(f"w: {w}")
+        #     tqdm.write(f"h: {h}")
 
-        x_min, y_min = np.maximum([0, 0], np.array([center_x, center_y]) - [w / 2, h / 2])
-        x_max, y_max = np.minimum([250, 250], np.array([center_x, center_y]) + [w / 2, h / 2])
+        x_min, y_min = np.maximum(
+            [0, 0], np.minimum([250, 250], np.array([center_x, center_y]) - [w / 2, h / 2])
+        )
 
+        x_max, y_max = np.maximum(
+            [0, 0], np.minimum([250, 250], np.array([center_x, center_y]) + [w / 2, h / 2])
+        )
+
+        # print(x_min)
+        # print(x_max)
         # Scale down the values to the 64x64 frame
-        w_small = torch.tensor(abs(x_max - x_min)) * 64 / 250
-        h_small = torch.tensor(abs(y_max - y_min)) * 64 / 250
-        center_x_small = max(0, min(64, center_x * 64 / 250))
-        center_y_small = max(0, min(64, center_y * 64 / 250))
+        w_small = torch.tensor((x_max - x_min) * 64 / 250)
+        h_small = torch.tensor((y_max - y_min) * 64 / 250)
+        center_x_small = center_x * 64 / 250
+        center_y_small = center_y * 64 / 250
 
         # Adjust sigma proportionally for the smaller frame
         sigma_x_small = w_small / 6
@@ -131,7 +138,7 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
         scaledLabels = []
         for trck_class in tracked_classes:
             temp = overlays[trck_class].detach().clone().numpy()
-            temp = temp / max(np.max(temp), 0.00001) * 255
+            temp = (temp / max(np.max(temp), 0.00001)) * 255
 
             scaledLabels.append(
                 cv2.resize(
@@ -198,7 +205,9 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
             print(f"Processing data: {i}")
             targets = get_targets(f"{input_dir}track/labels/", 5400, i)
             frames_tensor = []
-            labels_tensor = [[]] * len(tracked_classes)
+            labels_tensor = {}
+            for trck_class in tracked_classes:
+                labels_tensor[trck_class] = []
             data = torch.load(f"{input_dir}events/event_frames_{i}.pt")
             small_frame_dim = 64
             clip_maximum = 0
@@ -212,7 +221,7 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
                     fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
                     fps=90,
                     frameSize=(
-                        250 * 6 + 20 * 5,
+                        250 * (len(tracked_classes) + 1) + 20 * len(tracked_classes),
                         250,
                     ),
                     isColor=False,
@@ -263,22 +272,24 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
                     )
 
                 frames_tensor.append(res)
-                for i, trck_class in enumerate(tracked_classes):
-                    labels_tensor[i].append(overlays[trck_class].detach().clone())
+                for trck_class in tracked_classes:
+                    labels_tensor[trck_class].append(overlays[trck_class].detach().clone())
 
             print(f"\nSaving visualization to \x1b[1m{save_dir}{i}-vis.mp4\x1b[22m")
             if visualize:
                 out.release()
             print(f"\nSaving data to \x1b[1m{save_dir}{i}.pt\x1b[22m")
             clip_data = [torch.stack(frames_tensor).to_sparse()]
-            for label_tensor in labels_tensor:
-                clip_data.append(torch.stack(label_tensor).to_sparse())
 
-            print(f"{i}-{j}.pt")
+            for trck_class in tracked_classes:
+                clip_data.append(torch.stack(labels_tensor[trck_class]).to_sparse())
+
             torch.save(
                 clip_data,
                 f"{save_dir}{i}-{j}.pt",
             )
+
+            # print(f"{i}-{j}.pt")
 
 
 generate_labels("w31/box2/2-07-31/", "clips/frames_with_labels/", 14, 14, visualize)
