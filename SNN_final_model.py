@@ -102,12 +102,17 @@ for layer_nr in nr_par_last_layer_list:
             self.bn3 = nn.BatchNorm2d(8)
             self.lif3 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
 
-            self.fc1 = nn.Linear(5832, layer_nr)
-            self.lif4 = LILinearCell(layer_nr, 4096)
-            # self.lifbicycle = LILinearCell(layer_nr, 4096)
-            # self.lifcar = LILinearCell(layer_nr, 4096)
-            # self.lifbus = LILinearCell(layer_nr, 4096)
-            # self.liftruck = LILinearCell(layer_nr, 4096)
+            self.fcperson = nn.Linear(5832, layer_nr)
+            self.lifperson = LILinearCell(layer_nr, 4096)
+
+            self.fccar = nn.Linear(5832, layer_nr)
+            self.lifcar = LILinearCell(layer_nr, 4096)
+
+            self.fcbus = nn.Linear(5832, layer_nr)
+            self.lifbus = LILinearCell(layer_nr, 4096)
+
+            self.fctruck = nn.Linear(5832, layer_nr)
+            self.liftruck = LILinearCell(layer_nr, 4096)
 
             self.maxpool = nn.MaxPool2d(2, 2)
             self.dropout = nn.Dropout(p=0.5)
@@ -128,29 +133,39 @@ for layer_nr in nr_par_last_layer_list:
             spk3, mem3 = self.lif3(v3, mem3)
 
             spk3_flat = spk3.view(batch_size, -1)
-            v4 = self.dropout(self.fc1(spk3_flat))
-            spk4, mem4 = self.lif4(v4, mem4)
+            v4 = self.dropout(self.fcperson(spk3_flat))
+            spk4, mem4 = self.lifperson(v4, mem4)
 
-            spk5, mem5 = self.lif4(v4, mem5)
-            spk6, mem6 = self.lif4(v4, mem6)
-            spk7, mem7 = self.lif4(v4, mem7)
+            v5 = self.dropout(self.fccar(spk3_flat))
+            spk5, mem5 = self.lifcar(v5, mem5)
 
-            return torch.stack([spk4, spk5, spk6, spk7]), (
-                mem1,
-                mem2,
-                mem3,
-                mem4,
-                mem5,
-                mem6,
-                mem7,
+            v6 = self.dropout(self.fcbus(spk3_flat))
+            spk6, mem6 = self.lifbus(v6, mem6)
+
+            v7 = self.dropout(self.fctruck(spk3_flat))
+            spk7, mem7 = self.liftruck(v7, mem7)
+
+            return (
+                spk4,
+                spk5,
+                spk6,
+                spk7,
+                (
+                    mem1,
+                    mem2,
+                    mem3,
+                    mem4,
+                    mem5,
+                    mem6,
+                    mem7,
+                ),
             )
 
-    def loss_fn(output_frames, target_frames, step):
+    def loss_fn(output_frame, target_frame, step):
         mse_loss = 0
-        for output_frame, target_frame in zip(output_frames, target_frames):
-            mse_loss += loss_function(
-                output_frame, target_frame * 1000
-            )  # Multiplication due to the numbers being too small, should be fixed when creating the data
+        mse_loss += loss_function(
+            output_frame, target_frame * 1000
+        )  # Multiplication due to the numbers being too small, should be fixed when creating the data
 
         # if print_image:
         #     save_current_result(output_frame, target_frame, frames, step)
@@ -189,7 +204,7 @@ for layer_nr in nr_par_last_layer_list:
         model.train()
         start = time.time()
 
-        for data_nr in range(5, 6):
+        for data_nr in range(5, 9):
             data = get_data(data_nr)
 
             if data is not None:
@@ -215,15 +230,28 @@ for layer_nr in nr_par_last_layer_list:
 
                     for step in range(sequence_length):
                         input_frame = frames[:, step].unsqueeze(1)
-                        output, mem_states = model(input_frame, mem_states)
+                        output1, output2, output3, output4, mem_states = model(
+                            input_frame, mem_states
+                        )
                         # print(output.shape)
 
                         if step >= overlap:
-                            final_output = output.view(16, 4, 64, 64)
+                            final_output1 = output1.view(16, 64, 64)
+                            final_output2 = output2.view(16, 64, 64)
+                            final_output3 = output3.view(16, 64, 64)
+                            final_output4 = output4.view(16, 64, 64)
+
                             # print(targets.shape)
 
-                            loss += loss_fn(final_output, targets[:, :, step], step) / (
-                                sequence_length - overlap
+                            loss += (
+                                loss_fn(final_output1, targets[:, 0, step], step)
+                                / (sequence_length - overlap)
+                                + loss_fn(final_output2, targets[:, 1, step], step)
+                                / (sequence_length - overlap)
+                                + loss_fn(final_output3, targets[:, 2, step], step)
+                                / (sequence_length - overlap)
+                                + loss_fn(final_output4, targets[:, 3, step], step)
+                                / (sequence_length - overlap)
                             )  # only train on the last 50 frames
 
                     loss.backward()
@@ -236,7 +264,7 @@ for layer_nr in nr_par_last_layer_list:
         val_loss = 0
         num_test_batches = 0
         with torch.no_grad():
-            for data_nr in range(5, 6):
+            for data_nr in range(5, 9):
                 data = get_data(data_nr)
 
                 if data is not None:
@@ -255,12 +283,25 @@ for layer_nr in nr_par_last_layer_list:
 
                         for step in range(sequence_length):
                             input_frame = frames[:, step].unsqueeze(1)
-                            output, mem_states = model(input_frame, mem_states)
-
-                            final_output = output.view(16, 4, 64, 64)
-                            loss += (
-                                loss_fn(final_output, targets[:, :, step], step) / sequence_length
+                            output1, output2, output3, output4, mem_states = model(
+                                input_frame, mem_states
                             )
+
+                            final_output1 = output1.view(16, 64, 64)
+                            final_output2 = output2.view(16, 64, 64)
+                            final_output3 = output3.view(16, 64, 64)
+                            final_output4 = output4.view(16, 64, 64)
+
+                            loss += (
+                                loss_fn(final_output1, targets[:, 0, step], step)
+                                / (sequence_length - overlap)
+                                + loss_fn(final_output2, targets[:, 1, step], step)
+                                / (sequence_length - overlap)
+                                + loss_fn(final_output3, targets[:, 2, step], step)
+                                / (sequence_length - overlap)
+                                + loss_fn(final_output4, targets[:, 3, step], step)
+                                / (sequence_length - overlap)
+                            )  # only train on the last 50 frames
 
                         val_loss += loss.item()
                         num_test_batches += 1
