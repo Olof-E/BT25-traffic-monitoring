@@ -10,7 +10,7 @@ from matplotlib import patches
 from skimage import color, exposure, feature, filters, transform, util
 
 
-visualize = True
+visualize = False
 
 img = 0
 
@@ -163,14 +163,20 @@ def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results):
 models = []
 
 if not visualize:
-    t = Thread(target=calc_matrix, args=["clips/events/", "2-08/", 4, 5, models])
+    t = Thread(
+        target=calc_matrix,
+        args=["../w31/box2/2-07-31/events/", "../w31/box2/2-07-31/normal/", 9, 11, models],
+    )
     t.start()
 
-    t1 = Thread(target=calc_matrix, args=["clips/events/", "2-08/", 6, 7, models])
+    t1 = Thread(
+        target=calc_matrix,
+        args=["../w31/box2/2-07-31/events/", "../w31/box2/2-07-31/normal/", 7, 9, models],
+    )
     t1.start()
 
 
-calc_matrix("clips/events/", "2-08/", 2, 3, models)
+calc_matrix("../w31/box2/2-07-31/events/", "../w31/box2/2-07-31/normal/", 4, 6, models)
 
 if not visualize:
     t.join()
@@ -186,18 +192,28 @@ model.params = np.average(
     weights=[1 / len(models)] * len(models),
 )
 
+print(repr(model))
 
-event_data = torch.load("clips/events/event_frames_2.pt")
+# model = transform.SimilarityTransform()
+# model.params = np.array(
+#     [
+#         [8.50065481e-01, 7.29692005e-03, 1.22287204e02],
+#         [-7.29692005e-03, 8.50065481e-01, 6.95716137e01],
+#         [0.00000000e00, 0.00000000e00, 1.00000000e00],
+#     ]
+# )
 
-normal_cap = cv2.VideoCapture("2-08/_2.mp4")
+event_data = torch.load("../w31/box2/2-07-31/events/event_frames_15.pt")
 
-normal_cap.set(1, 3690)
-img_left = event_data[3690].to_dense()
+normal_cap = cv2.VideoCapture("../w31/box2/2-07-31/normal/_15.mp4")
+
+normal_cap.set(1, 4)
+img_left = event_data[4].to_dense()
 ret, img_right = normal_cap.read()
 
 target_tensor = None
 
-with open(os.path.join("./yolo/results/track2/labels", "_2_3690.txt")) as file:
+with open(os.path.join("../w31/box2/2-07-31/labels/track/labels", "_15_4.txt")) as file:
     target_data = [
         float(value)
         for line in file

@@ -23,7 +23,7 @@ def create_noise(frame):
     pu = u[:, permuted_indices]
 
     # Fold shuffled blocks back to an image
-    shuffled_frame = F.fold(pu, output_size=(200, 200), kernel_size=16, stride=16, padding=0)
+    shuffled_frame = F.fold(pu, output_size=(250, 250), kernel_size=16, stride=16, padding=0)
 
     return [torch.tensor(shuffled_frame), torch.tensor(np.zeros((64, 64)))]
 

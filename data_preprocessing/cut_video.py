@@ -90,7 +90,7 @@ def save_clip(frames, output_dir, current_clip, num_of_clips, fps, proc_time):
     save_time = time.time() - start_time
 
     tqdm.write(
-        f"Clip {current_clip+1}/{num_of_clips} [\x1b[92m\u2714\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time+save_time))}\x1b[22m\n"
+        f"Clip {current_clip+1}/{num_of_clips} [\x1b[92m\u2713\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time+save_time))}\x1b[22m\n"
     )
 
 
