@@ -13,7 +13,13 @@ import os
 
 torch.cuda.set_device(0)
 
-tracked_classes = [0, 1, 2, 5, 7]
+# 0 - Person
+# 1 - Bicycle
+# 2 - Car
+# 5 - Bus
+# 7 - Truck
+
+tracked_classes = [0, 2, 5, 7]
 
 visualize = True
 
@@ -161,19 +167,16 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
             (
                 frame.detach().clone() * 255,
                 np.ones((250, 20)) * 255,
-                scaledLabels[0],
-                np.ones((250, 20)) * 255,
-                scaledLabels[1],
-                np.ones((250, 20)) * 255,
-                scaledLabels[2],
-                np.ones((250, 20)) * 255,
-                scaledLabels[3],
-                np.ones((250, 20)) * 255,
-                scaledLabels[4],
             ),
             axis=1,
         )
-
+        for i, scaledLabel in enumerate(scaledLabels):
+            if i == len(scaledLabels) - 1:
+                tempframe = np.concatenate((tempframe, scaledLabel), axis=1)
+            else:
+                tempframe = np.concatenate(
+                    (tempframe, scaledLabel, np.ones((250, 20)) * 255), axis=1
+                )
         out.write(tempframe.astype(np.uint8))
 
     return frame.detach().clone(), overlays
@@ -189,20 +192,15 @@ H.params = np.array(
 )
 
 # x_min, y_min, x_max, y_max
-rois = [(630 - 250, 200, 630, 450)]  # (25, 250, 225, 450)]  # (410, 250, 610, 450)
-
-
-# 0 - Person
-# 1 - Bicycle
-# 2 - Car
-# 5 - Bus
-# 7 - Truck
+rois = [(20, 150, 270, 400), (620 - 250, 150, 620, 400)]  # [(630 - 250, 200, 630, 450)]
 
 
 def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
     for i in range(start_clip, end_clip + 1):
         for j, roi in enumerate(rois):
-            print(f"Processing data: {i}")
+            print(
+                f"Processing clip: {i-start_clip+1}/{end_clip-start_clip} | ROI: {roi} ({j+1}/{len(rois)})"
+            )
             targets = get_targets(f"{input_dir}track/labels/", 5400, i)
             frames_tensor = []
             labels_tensor = {}
@@ -217,7 +215,7 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
             out = None
             if visualize:
                 out = cv2.VideoWriter(
-                    filename=f"{save_dir}{i}-vis.mp4",
+                    filename=f"{save_dir}{i}-{j}-vis.mp4",
                     fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
                     fps=90,
                     frameSize=(
@@ -233,9 +231,7 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
                 ncols=86,
                 mininterval=0.25,
             ):
-                frame = data[frame_idx].to_dense()[
-                    roi[1] : roi[3], roi[0] : roi[2]
-                ]  # [180:480, 100:400]
+                frame = data[frame_idx].to_dense()[roi[1] : roi[3], roi[0] : roi[2]]
                 warped = []
 
                 if targets[frame_idx] == None:
@@ -275,10 +271,10 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
                 for trck_class in tracked_classes:
                     labels_tensor[trck_class].append(overlays[trck_class].detach().clone())
 
-            print(f"\nSaving visualization to \x1b[1m{save_dir}{i}-vis.mp4\x1b[22m")
+            print(f"\nSaving visualization to \x1b[1m{save_dir}{i}-{j}-vis.mp4\x1b[22m")
             if visualize:
                 out.release()
-            print(f"\nSaving data to \x1b[1m{save_dir}{i}.pt\x1b[22m")
+            print(f"\nSaving data to \x1b[1m{save_dir}{i}-{j}.pt\x1b[22m")
             clip_data = [torch.stack(frames_tensor).to_sparse()]
 
             for trck_class in tracked_classes:
@@ -289,7 +285,5 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
                 f"{save_dir}{i}-{j}.pt",
             )
 
-            # print(f"{i}-{j}.pt")
 
-
-generate_labels("w31/box2/2-07-31/", "clips/frames_with_labels/", 14, 14, visualize)
+generate_labels("w38/box3/3-09-27/", "clips/frames_with_labels/", 5, 13, visualize)
