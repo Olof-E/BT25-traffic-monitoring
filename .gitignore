@@ -9,6 +9,7 @@ converter/
 __pycache__
 
 *.pt
+*.pth
 *.raw
 *.json
 *.jpg
