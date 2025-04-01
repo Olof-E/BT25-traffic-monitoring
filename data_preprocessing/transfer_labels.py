@@ -1,3 +1,4 @@
+from math import exp
 import cv2
 import torch
 import numpy as np
@@ -50,7 +51,7 @@ def count_events(frame, min_max):
     y_min, y_max, x_min, x_max = min_max
     number_of_events = torch.sum(frame > 0)
     min_events_threshold = max(
-        1, 0.01 * ((x_max - x_min) * (y_max - y_min))
+        1, 0.001 * ((x_max - x_min) * (y_max - y_min))
     )  # Dynamic minimum based on bbox area
     if number_of_events < min_events_threshold:
         ratio = 0
@@ -100,8 +101,8 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
         center_y_small = center_y * 64 / 250
 
         # Adjust sigma proportionally for the smaller frame
-        sigma_x_small = w_small / 6
-        sigma_y_small = h_small / 6
+        sigma_x_small = w_small / 6 * (1 - torch.exp(-(65 * abs(w_small / 64) + 0.1)))
+        sigma_y_small = h_small / 6 * (1 - torch.exp(-(65 * abs(h_small / 64) + 0.1)))
         events_factor = count_events(
             frame[int(y_min) : int(y_max), int(x_min) : int(x_max)],
             (y_min, y_max, x_min, x_max),
@@ -286,4 +287,4 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
             )
 
 
-generate_labels("w38/box3/3-09-27/", "clips/frames_with_labels/", 5, 13, visualize)
+generate_labels("w38/box3/3-09-27/", "clips/frames_with_labels/", 5, 8, visualize)
