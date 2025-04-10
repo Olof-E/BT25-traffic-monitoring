@@ -1,4 +1,6 @@
+from concurrent.futures import thread
 from math import exp
+from threading import Thread
 import cv2
 import torch
 import numpy as np
@@ -21,8 +23,6 @@ torch.cuda.set_device(0)
 # 7 - Truck
 
 tracked_classes = [0, 2, 5, 7]
-
-visualize = True
 
 
 def get_targets(directory, target_length, file_nr):
@@ -51,7 +51,7 @@ def count_events(frame, min_max):
     y_min, y_max, x_min, x_max = min_max
     number_of_events = torch.sum(frame > 0)
     min_events_threshold = max(
-        1, 0.001 * ((x_max - x_min) * (y_max - y_min))
+        1, 0.004 * ((x_max - x_min) * (y_max - y_min))
     )  # Dynamic minimum based on bbox area
     if number_of_events < min_events_threshold:
         ratio = 0
@@ -101,8 +101,8 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
         center_y_small = center_y * 64 / 250
 
         # Adjust sigma proportionally for the smaller frame
-        sigma_x_small = w_small / 6 * (1 - torch.exp(-(65 * abs(w_small / 64) + 0.1)))
-        sigma_y_small = h_small / 6 * (1 - torch.exp(-(65 * abs(h_small / 64) + 0.1)))
+        sigma_x_small = w_small / 6  # * (1 - torch.exp(-(65 * abs(w_small / 64) + 0.1)))
+        sigma_y_small = h_small / 6  # * (1 - torch.exp(-(65 * abs(h_small / 64) + 0.1)))
         events_factor = count_events(
             frame[int(y_min) : int(y_max), int(x_min) : int(x_max)],
             (y_min, y_max, x_min, x_max),
@@ -193,98 +193,115 @@ H.params = np.array(
 )
 
 # x_min, y_min, x_max, y_max
-rois = [(20, 150, 270, 400), (620 - 250, 150, 620, 400)]  # [(630 - 250, 200, 630, 450)]
+rois = [(90, 150, 340, 400), (575 - 250, 150, 575, 400)]  # []
+
+
+def process_roi(i, j, clip_idx, roi, start_clip, end_clip, input_dir, save_dir, visualize):
+    print(
+        f"Processing clip: {i-start_clip+1}/{end_clip-start_clip+1} | ROI: {roi} ({j+1}/{len(rois)})"
+    )
+    targets = get_targets(f"{input_dir}track/labels/", 5400, i)
+    frames_tensor = []
+    labels_tensor = {}
+    for trck_class in tracked_classes:
+        labels_tensor[trck_class] = []
+    data = torch.load(f"{input_dir}events/event_frames_{i}.pt")
+    small_frame_dim = 64
+    clip_maximum = 0
+    overlays = {}
+    for trck_class in tracked_classes:
+        overlays[trck_class] = torch.zeros((small_frame_dim, small_frame_dim))
+    out = None
+    if visualize:
+        out = cv2.VideoWriter(
+            filename=f"{save_dir}{clip_idx+j}-vis.mp4",
+            fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
+            fps=90,
+            frameSize=(
+                250 * (len(tracked_classes) + 1) + 20 * len(tracked_classes),
+                250,
+            ),
+            isColor=False,
+        )
+
+    for frame_idx in tqdm(
+        range(int(len(data))),
+        desc=f"annotating frames",
+        ncols=86,
+        mininterval=0.25,
+    ):
+        frame = data[frame_idx].to_dense()[roi[1] : roi[3], roi[0] : roi[2]]
+        warped = []
+
+        if targets[frame_idx] == None:
+            print("missing:", frame_idx)
+            res = frame.detach().clone()
+
+        elif len(targets[frame_idx]) == 0:
+            res = frame.detach().clone()
+
+        else:
+            for tar in range(len(targets[frame_idx])):
+                x, y = targets[frame_idx][tar][1:3] * torch.tensor([736, 460])
+                w, h = targets[frame_idx][tar][3:] * torch.tensor([736, 460])
+
+                x_min, y_min = np.array([x, y]) - [w / 2, h / 2]
+                x_max, y_max = np.array([x, y]) + [w / 2, h / 2]
+
+                x_min, y_min = H._apply_mat((x_min, y_min), H.inverse.params)[0]
+                x_max, y_max = H._apply_mat((x_max, y_max), H.inverse.params)[0]
+                w = x_max - x_min
+                h = y_max - y_min
+
+                transformed_coordinates = H._apply_mat((x, y), H.inverse.params)[0]
+                warped.append(
+                    [
+                        targets[frame_idx][tar][0],
+                        transformed_coordinates,
+                        torch.tensor([w, h]),
+                    ]
+                )
+
+            res, overlays = annotate_frame(
+                frame, warped, overlays, out, roi, clip_maximum, visualize
+            )
+
+        frames_tensor.append(res)
+        for trck_class in tracked_classes:
+            labels_tensor[trck_class].append(overlays[trck_class].detach().clone())
+
+    print(f"\nSaving visualization to \x1b[1m{save_dir}{clip_idx+j}-vis.mp4\x1b[22m")
+    if visualize:
+        out.release()
+    print(f"\nSaving data to \x1b[1m{save_dir}{clip_idx+j}.pt\x1b[22m")
+    clip_data = [torch.stack(frames_tensor).to_sparse()]
+
+    for trck_class in tracked_classes:
+        clip_data.append(torch.stack(labels_tensor[trck_class]).to_sparse())
+
+    torch.save(
+        clip_data,
+        f"{save_dir}{clip_idx+j}.pt",
+    )
 
 
 def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
+    clip_idx = 103
+    threads = [None, None]
     for i in range(start_clip, end_clip + 1):
         for j, roi in enumerate(rois):
-            print(
-                f"Processing clip: {i-start_clip+1}/{end_clip-start_clip} | ROI: {roi} ({j+1}/{len(rois)})"
-            )
-            targets = get_targets(f"{input_dir}track/labels/", 5400, i)
-            frames_tensor = []
-            labels_tensor = {}
-            for trck_class in tracked_classes:
-                labels_tensor[trck_class] = []
-            data = torch.load(f"{input_dir}events/event_frames_{i}.pt")
-            small_frame_dim = 64
-            clip_maximum = 0
-            overlays = {}
-            for trck_class in tracked_classes:
-                overlays[trck_class] = torch.zeros((small_frame_dim, small_frame_dim))
-            out = None
-            if visualize:
-                out = cv2.VideoWriter(
-                    filename=f"{save_dir}{i}-{j}-vis.mp4",
-                    fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
-                    fps=90,
-                    frameSize=(
-                        250 * (len(tracked_classes) + 1) + 20 * len(tracked_classes),
-                        250,
-                    ),
-                    isColor=False,
-                )
-
-            for frame_idx in tqdm(
-                range(int(len(data))),
-                desc=f"annotating frames",
-                ncols=86,
-                mininterval=0.25,
-            ):
-                frame = data[frame_idx].to_dense()[roi[1] : roi[3], roi[0] : roi[2]]
-                warped = []
-
-                if targets[frame_idx] == None:
-                    print("missing:", frame_idx)
-                    res = frame.detach().clone()
-
-                elif len(targets[frame_idx]) == 0:
-                    res = frame.detach().clone()
-
-                else:
-                    for tar in range(len(targets[frame_idx])):
-                        x, y = targets[frame_idx][tar][1:3] * torch.tensor([736, 460])
-                        w, h = targets[frame_idx][tar][3:] * torch.tensor([736, 460])
-
-                        x_min, y_min = np.array([x, y]) - [w / 2, h / 2]
-                        x_max, y_max = np.array([x, y]) + [w / 2, h / 2]
-
-                        x_min, y_min = H._apply_mat((x_min, y_min), H.inverse.params)[0]
-                        x_max, y_max = H._apply_mat((x_max, y_max), H.inverse.params)[0]
-                        w = x_max - x_min
-                        h = y_max - y_min
-
-                        transformed_coordinates = H._apply_mat((x, y), H.inverse.params)[0]
-                        warped.append(
-                            [
-                                targets[frame_idx][tar][0],
-                                transformed_coordinates,
-                                torch.tensor([w, h]),
-                            ]
-                        )
-
-                    res, overlays = annotate_frame(
-                        frame, warped, overlays, out, roi, clip_maximum, visualize
-                    )
-
-                frames_tensor.append(res)
-                for trck_class in tracked_classes:
-                    labels_tensor[trck_class].append(overlays[trck_class].detach().clone())
-
-            print(f"\nSaving visualization to \x1b[1m{save_dir}{i}-{j}-vis.mp4\x1b[22m")
-            if visualize:
-                out.release()
-            print(f"\nSaving data to \x1b[1m{save_dir}{i}-{j}.pt\x1b[22m")
-            clip_data = [torch.stack(frames_tensor).to_sparse()]
-
-            for trck_class in tracked_classes:
-                clip_data.append(torch.stack(labels_tensor[trck_class]).to_sparse())
-
-            torch.save(
-                clip_data,
-                f"{save_dir}{i}-{j}.pt",
-            )
+            process_roi(i, j, clip_idx, roi, start_clip, end_clip, input_dir, save_dir, visualize)
+        #     threads[j] = Thread(
+        #         target=process_roi,
+        #         args=[i, j, clip_idx, roi, start_clip, end_clip, input_dir, save_dir, visualize],
+        #     )
+        #     threads[j].start()
+        # for j in range(len(threads)):
+        #     threads[j].join()
+        clip_idx += 2
 
 
-generate_labels("w38/box3/3-09-27/", "clips/frames_with_labels/", 5, 8, visualize)
+generate_labels("w35/box1/1-09-04/", "clips/frames_with_labels/", 4, 6, True)
+
+# w38/box3/3-09-27/
+# w31/box2/2-08-01/
