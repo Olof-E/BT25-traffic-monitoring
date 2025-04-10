@@ -13,17 +13,18 @@ import matplotlib.pyplot as plt
 from datetime import date
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+# Set device
 cuda_kernel = 0
 today = date.today()
 torch.cuda.set_device(cuda_kernel)
-num_inputs = 250 * 250
+num_inputs = 200 * 200
 num_outputs = 64 * 64  # 4096
 # tau_list = [120, 140, 160, 180, 200] #For trying different taus
-layer_nr = 4000
-w_decay = 1e-4
-lr = 1e-3
+layer_nr = 2000
+w_decay = 0.01  # 6.5e-3
+lr = 9e-4
 print_image = (
-    True  # Set true to save current image for each loop, used to see progress during training
+    False  # Set true to save current image for each loop, used to see progress during training
 )
 nr_data_files = 26
 loss_function = nn.MSELoss()
@@ -31,8 +32,6 @@ tau_mem = 180
 k = 0
 
 from data_loading import get_data
-
-# matplotlib.use("Agg")
 
 
 class SNN(nn.Module):
@@ -110,14 +109,14 @@ class SNN(nn.Module):
         )
 
 
-def loss_fn(output_frame, target_frame, step):
+def loss_fn(output_frame, target_frame, step, class_id):
     mse_loss = 0
     mse_loss += loss_function(
         output_frame, target_frame * 1000
     )  # Multiplication due to the numbers being too small, should be fixed when creating the data
 
     # if print_image:
-    #     save_current_result(output_frame, target_frame, frames, step)
+    #     save_current_result(output_frame, target_frame, frames, step, class_id)
 
     return mse_loss
 
@@ -127,19 +126,21 @@ model = SNN()
 
 
 model.load_state_dict(
-    torch.load("./2025-04-01_Tau_200_newest_version_180_4.pth", weights_only=True)
+    torch.load("models/2025-04-10_multiclass-nadamw-6-14.5976.pth", weights_only=True)
 )
 model = model.to(device)
 model.eval()
 
 
-data = torch.load(
-    f"./w38/box3/3-09-27/events/event_frames_6.pt"
-)  # f"./w31/box2/2-08-01/events/event_frames_4.pt"
+data = torch.load(f"./w31/box2/2-07-31/events/event_frames_14.pt")
+# f"./w31/box2/2-07-31/events/event_frames_14.pt"
+# f"./w31/box2/2-08-01/events/event_frames_4.pt"
+# f"./w38/box3/3-09-27/events/event_frames_6.pt"
+
 
 mem_states = (None, None, None, None, None, None, None)
 
-fig, ax = plt.subplots(1, 5, figsize=(30, 10), layout="compressed")
+fig, ax = plt.subplots(1, 5, figsize=(30, 10))  # , layout="compressed")
 
 
 ax[0].axis("off")
@@ -177,9 +178,9 @@ output_img4 = ax[4].imshow(
 )
 
 
-cbar = fig.colorbar(
-    output_img4,
-)
+# cbar = fig.colorbar(
+#     output_img4,
+# )
 
 
 FRAMES = len(data)
@@ -193,7 +194,7 @@ def animate(step):
     # torch.cuda.empty_cache()
     with torch.no_grad():
         frame = torch.tensor(
-            np.array(np.array([[data[step].to_dense()[150:400, 20:270]]])), device=device
+            np.array(np.array([[data[step].to_dense()[150:400, 565 - 250 : 565]]])), device=device
         )  # [180:480, 100:400]
         frame.to(device)
 
@@ -264,9 +265,11 @@ ani = animation.FuncAnimation(
 
 # plt.show()
 
-save_dir = "test-anim-multi-test.mp4"  # os.path.join(os.path.dirname(sys.argv[0]), 'MyVideo.mp4')
+save_dir = (
+    "test-anim-multi-data1h5-200.mp4"  # os.path.join(os.path.dirname(sys.argv[0]), 'MyVideo.mp4')
+)
 print(f"Saving video to {save_dir}...")
-video_writer = animation.FFMpegWriter(fps=60, bitrate=-1)
+video_writer = animation.FFMpegWriter(fps=90, bitrate=-1)
 update_func = lambda _i, _n: progress_bar.update(1)
 with tqdm(total=len(data), ncols=86, desc="Saving video") as progress_bar:
     ani.save(save_dir, writer=video_writer, dpi=100, progress_callback=update_func)

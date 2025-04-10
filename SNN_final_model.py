@@ -18,12 +18,12 @@ from datetime import date
 cuda_kernel = 0
 today = date.today()
 torch.cuda.set_device(cuda_kernel)
-num_inputs = 300 * 300
+num_inputs = 200 * 200
 num_outputs = 64 * 64  # 4096
 # tau_list = [120, 140, 160, 180, 200] #For trying different taus
-nr_par_last_layer_list = [4000]
-w_decay = 1e-4
-lr = 8.5e-4
+nr_par_last_layer_list = [2000]
+w_decay = 0.01  # 6.5e-3
+lr = 9e-3
 print_image = (
     False  # Set true to save current image for each loop, used to see progress during training
 )
@@ -34,7 +34,7 @@ k = 0
 
 
 def save_data(model, train_loss, validation_loss, tau, today, epoch, k):
-    file_name = f"{today}_Tau_200_newest_version_{tau}_4"
+    file_name = f"models/{today}_{tau}_multiclass-nadamw-final"
 
     torch.save(model.state_dict(), f"{file_name}.pth")
 
@@ -54,9 +54,9 @@ def save_data(model, train_loss, validation_loss, tau, today, epoch, k):
     return k
 
 
-def save_current_result(output_frame, target_frame, frames, step):
-    maximum_value = torch.max(output_frame).item()
-    fig, axes = plt.subplots(1, 3, figsize=(10, 10))
+def save_current_result(output_frame, target_frame, frames, step, classId):
+    maximum_value = torch.max(output_frame[0][1]).item()
+    fig, axes = plt.subplots(1, 3, figsize=(14, 10))
     axes[0].imshow(frames[0][step].cpu().detach().numpy(), cmap="gray")
     axes[1].imshow(target_frame[0].cpu().detach().numpy(), cmap="gray", vmin=0, vmax=0.03)
     axes[2].imshow(output_frame[0].cpu().detach().numpy(), cmap="gray", vmax=maximum_value)
@@ -64,9 +64,9 @@ def save_current_result(output_frame, target_frame, frames, step):
     axes[0].axis("off")
     axes[1].axis("off")
     axes[2].axis("off")
-    fig.tight_layout()
+    # fig.tight_layout()
 
-    plt.savefig(f"test{cuda_kernel}.png", bbox_inches="tight", pad_inches=0)
+    plt.savefig(f"test-class{classId}.png", bbox_inches="tight", pad_inches=0)
     plt.close()
 
 
@@ -161,21 +161,26 @@ for layer_nr in nr_par_last_layer_list:
                 ),
             )
 
-    def loss_fn(output_frame, target_frame, step):
+    def loss_fn(output_frame, target_frame, step, class_id):
         mse_loss = 0
         mse_loss += loss_function(
             output_frame, target_frame * 1000
         )  # Multiplication due to the numbers being too small, should be fixed when creating the data
 
-        # if print_image:
-        #     save_current_result(output_frame, target_frame, frames, step)
+        if print_image:
+            save_current_result(output_frame, target_frame, frames, step, class_id)
 
         return mse_loss
+
+        # if print_image:
+        #     save_current_result(output_frame, target_frame, frames, step)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SNN().to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=w_decay)
+    optimizer = torch.optim.NAdam(
+        model.parameters(), lr=lr, weight_decay=w_decay, decoupled_weight_decay=True
+    )
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     # Print data of the model
@@ -191,12 +196,14 @@ for layer_nr in nr_par_last_layer_list:
             print(f"Layer: {name} | Type: {param_type} | Number of Parameters: {param.numel()}")
 
     print("===================================================")
-    num_epochs = 12
+    num_epochs = 8
     frame_size = (64, 64)
     sequence_length = 75
     train_loss_list = []
     val_loss_list = []
     overlap = 25
+
+    best_val = 999999
 
     for epoch in range(num_epochs):
         train_loss = 0
@@ -204,7 +211,7 @@ for layer_nr in nr_par_last_layer_list:
         model.train()
         start = time.time()
 
-        for data_nr in range(5, 9):
+        for data_nr in range(0, 78):
             data = get_data(data_nr)
 
             if data is not None:
@@ -236,21 +243,25 @@ for layer_nr in nr_par_last_layer_list:
                         # print(output.shape)
 
                         if step >= overlap:
-                            final_output1 = output1.view(16, 64, 64)
-                            final_output2 = output2.view(16, 64, 64)
-                            final_output3 = output3.view(16, 64, 64)
-                            final_output4 = output4.view(16, 64, 64)
+                            final_output1 = output1.view(8, 64, 64)
+                            final_output2 = output2.view(8, 64, 64)
+                            final_output3 = output3.view(8, 64, 64)
+                            final_output4 = output4.view(8, 64, 64)
 
                             # print(targets.shape)
 
                             loss += (
-                                loss_fn(final_output1, targets[:, 0, step], step)
+                                2
+                                * loss_fn(final_output1, targets[:, 0, step], step, 0)
                                 / (sequence_length - overlap)
-                                + loss_fn(final_output2, targets[:, 1, step], step)
+                                + 0.5
+                                * loss_fn(final_output2, targets[:, 1, step], step, 2)
                                 / (sequence_length - overlap)
-                                + loss_fn(final_output3, targets[:, 2, step], step)
+                                + 2.2
+                                * loss_fn(final_output3, targets[:, 2, step], step, 5)
                                 / (sequence_length - overlap)
-                                + loss_fn(final_output4, targets[:, 3, step], step)
+                                + 0.9
+                                * loss_fn(final_output4, targets[:, 3, step], step, 7)
                                 / (sequence_length - overlap)
                             )  # only train on the last 50 frames
 
@@ -264,7 +275,7 @@ for layer_nr in nr_par_last_layer_list:
         val_loss = 0
         num_test_batches = 0
         with torch.no_grad():
-            for data_nr in range(5, 9):
+            for data_nr in range(0, 78):
                 data = get_data(data_nr)
 
                 if data is not None:
@@ -287,19 +298,23 @@ for layer_nr in nr_par_last_layer_list:
                                 input_frame, mem_states
                             )
 
-                            final_output1 = output1.view(16, 64, 64)
-                            final_output2 = output2.view(16, 64, 64)
-                            final_output3 = output3.view(16, 64, 64)
-                            final_output4 = output4.view(16, 64, 64)
+                            final_output1 = output1.view(8, 64, 64)
+                            final_output2 = output2.view(8, 64, 64)
+                            final_output3 = output3.view(8, 64, 64)
+                            final_output4 = output4.view(8, 64, 64)
 
                             loss += (
-                                loss_fn(final_output1, targets[:, 0, step], step)
+                                2
+                                * loss_fn(final_output1, targets[:, 0, step], step, 0)
                                 / (sequence_length - overlap)
-                                + loss_fn(final_output2, targets[:, 1, step], step)
+                                + 0.5
+                                * loss_fn(final_output2, targets[:, 1, step], step, 2)
                                 / (sequence_length - overlap)
-                                + loss_fn(final_output3, targets[:, 2, step], step)
+                                + 2.2
+                                * loss_fn(final_output3, targets[:, 2, step], step, 5)
                                 / (sequence_length - overlap)
-                                + loss_fn(final_output4, targets[:, 3, step], step)
+                                + 0.9
+                                * loss_fn(final_output4, targets[:, 3, step], step, 7)
                                 / (sequence_length - overlap)
                             )  # only train on the last 50 frames
 
@@ -310,18 +325,24 @@ for layer_nr in nr_par_last_layer_list:
         gc.collect()
 
         epoch_time = time.time() - start
-        if i == 0:
+        if epoch == 0:
             print(
-                f"\x1b[0G\x1b[0KEpoch {epoch+1} | train loss: {train_loss/num_train_batches:.3f} | val loss {val_loss/num_test_batches:.3f} | finished in {pretty_time(epoch_time)}",
+                f"\x1b[0G\x1b[2KEpoch {epoch+1} | train loss: \x1b[1m{train_loss/num_train_batches:.3f}\x1b[22m | val loss \x1b[1m{val_loss/num_test_batches:.3f}\x1b[22m | finished in \x1b[1m{pretty_time(epoch_time)}\x1b[22m",
                 end="\n",
             )
         else:
             print(
-                f"\x1b[0F\x1b[0G\x1b[0KEpoch {epoch+1} | train loss: \x1b[1m{train_loss/num_train_batches:.3f}\x1b[22m | val loss \x1b[1m{val_loss/num_test_batches:.3f}\x1b[22m | finished in \x1b[1m{pretty_time(epoch_time)}\x1b[22m",
+                f"\x1b[2K\x1b[0GEpoch {epoch+1} | train loss: \x1b[1m{train_loss/num_train_batches:.3f}\x1b[22m | val loss \x1b[1m{val_loss/num_test_batches:.3f}\x1b[22m | finished in \x1b[1m{pretty_time(epoch_time)}\x1b[22m",
                 end="\n",
             )
 
         train_loss_list.append(np.round(train_loss / num_train_batches, 4))
         val_loss_list.append(np.round(val_loss / num_test_batches, 4))
+
+        if val_loss / num_test_batches < best_val:
+            best_val = val_loss / num_test_batches
+            file_name = f"models/{today}_multiclass-nadamw-{epoch}-{np.round(val_loss / num_test_batches, 4)}"
+
+            torch.save(model.state_dict(), f"{file_name}.pth")
 
     k = save_data(model, train_loss_list, val_loss_list, tau_mem, today, epoch, k)

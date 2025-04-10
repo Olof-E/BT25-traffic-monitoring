@@ -5,7 +5,7 @@ import tqdm as tqdm
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 
-sequence_length, overlap_length, batch_size = 75, 25, 16
+sequence_length, overlap_length, batch_size = 75, 25, 8
 
 
 class EventDataset(Dataset):
@@ -62,7 +62,7 @@ def create_target_sequences(data, sequence_length, overlap_length, batch_size):
 
 def get_data(number):
     # try:
-    data = torch.load(f"./clips/frames_with_labels/{number}-0.pt")
+    data = torch.load(f"./clips/frames_with_labels/{number}.pt")
     if not data[0].is_coalesced():
         data[0] = data[0].coalesce()
 
@@ -101,8 +101,12 @@ def get_data(number):
     dataset = EventDataset(X_train, y_train)
     test_dataset = EventDataset(X_test, y_test)
 
-    train_loader = DataLoader(dataset, batch_size=16, shuffle=True, drop_last=True)
-    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, drop_last=True)
+    train_loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=4
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, drop_last=True, num_workers=4
+    )
 
     # print(len(frames_tensor))
     # print(len(frames_sequence))
