@@ -1,6 +1,8 @@
+import os
 from ctypes import *
 
-event_lib = CDLL("./event-reader.dll")
+dirname = os.path.dirname(__file__)
+event_lib = CDLL(os.path.join(dirname, "event-reader.dll"))
 
 
 class Event(Structure):
