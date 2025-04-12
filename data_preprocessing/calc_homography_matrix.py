@@ -27,13 +27,15 @@ def process_clip(event_path, normal_path):
     matches = []
     for i in tqdm(
         range(0, 5000, 50),
-        ncols=90,
+        ncols=86,
         mininterval=0.75,
+        leave=False,
     ):
         normal_cap.set(1, 0 + i)
         img_left2 = event_data[i + 1].to_dense()  # Read the Event frame
-        ret, img_right = normal_cap.read()  # Read the Normal frame
-        ret, img_right2 = normal_cap.read()  # Read the Normal frame
+        _, img_right = normal_cap.read()  # Read the Normal frame
+        _, _ = normal_cap.read()  # Read the Normal frame
+        _, img_right2 = normal_cap.read()  # Read the Normal frame
 
         img_left = exposure.adjust_gamma(filters.gaussian(img_left2, 10), 5)
 
@@ -73,7 +75,6 @@ def process_clip(event_path, normal_path):
                 cirk2 = patches.Circle((x2, y2), radius=r2, linewidth=2, edgecolor="r", fill=False)
 
                 axes[1].add_patch(cirk2)
-
         for y1, x1, r1 in blobs1:
             best_match = 0.2
             best_index = -1
@@ -84,33 +85,41 @@ def process_clip(event_path, normal_path):
                     best_index = i
 
             if best_index != -1:
-                model_matches += 1
-                total_error += best_match
-                matches.append([[x1, y1], [x2, y2]])
-                if visualize:
-                    conn = patches.ConnectionPatch(
-                        xyA=(x1, y1),
-                        xyB=(blobs2[best_index][1], blobs2[best_index][0]),
-                        coordsA="data",
-                        coordsB="data",
-                        axesA=axes[0],
-                        axesB=axes[1],
-                        color="lightgreen",
-                        linewidth=3,
+                for i, (y2, x2, r2) in enumerate(blobs1):
+                    error = math.dist(
+                        (x2 / 640, y2 / 480),
+                        (blobs2[best_index][1] / 736, blobs2[best_index][0] / 460),
                     )
+                    if error < best_match:
+                        break
+                else:
+                    model_matches += 1
+                    total_error += best_match
+                    matches.append([[x1, y1], [blobs2[best_index][1], blobs2[best_index][0]]])
+                    if visualize:
+                        conn = patches.ConnectionPatch(
+                            xyA=(x1, y1),
+                            xyB=(blobs2[best_index][1], blobs2[best_index][0]),
+                            coordsA="data",
+                            coordsB="data",
+                            axesA=axes[0],
+                            axesB=axes[1],
+                            color="lightgreen",
+                            linewidth=3,
+                        )
 
-                    fig.add_artist(conn)
+                        fig.add_artist(conn)
 
-                    cirk1 = patches.Circle((x1, y1), radius=2, color="lightgreen", fill=True)
-                    cirk2 = patches.Circle(
-                        (blobs2[best_index][1], blobs2[best_index][0]),
-                        radius=2,
-                        color="lightgreen",
-                        fill=True,
-                    )
+                        cirk1 = patches.Circle((x1, y1), radius=2, color="lightgreen", fill=True)
+                        cirk2 = patches.Circle(
+                            (blobs2[best_index][1], blobs2[best_index][0]),
+                            radius=2,
+                            color="lightgreen",
+                            fill=True,
+                        )
 
-                    axes[0].add_patch(cirk1)
-                    axes[1].add_patch(cirk2)
+                        axes[0].add_patch(cirk1)
+                        axes[1].add_patch(cirk2)
 
         if visualize:
             axes[0].axis("off")
@@ -126,20 +135,20 @@ def process_clip(event_path, normal_path):
 
     matches = np.array(matches)
     model = transform.SimilarityTransform()
-    weight = 0
+    weight = 0.000001
     if len(matches) > 4:
         model.estimate(matches[:, 0], matches[:, 1])
-        weight = 0.3 * model_matches + 0.7 * (model_matches - total_error * 10)
+        weight = 0.4 * model_matches + 0.6 * (model_matches - total_error * 10)
 
-    return model, weight
+    return model, weight, total_error
 
 
-def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results):
+def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results, res_weights):
 
     models = []
     weights = []
     for i in range(start_clip, end_clip + 1):
-        model, weight = process_clip(
+        model, weight, total_error = process_clip(
             f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4"
         )
         models.append(model.params)
@@ -158,33 +167,48 @@ def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results):
     )
 
     results.append(model.params)
+    res_weights.append(1 - total_error)
 
 
+mod_weights = []
 models = []
 
+curr_dir = "w35/box1/1-09-04"
+
+# "w31/box2/2-07-31"
+# "w35/box1/1-09-04"
+
 if not visualize:
-    t = Thread(
-        target=calc_matrix,
-        args=["../w31/box2/2-07-31/events/", "../w31/box2/2-07-31/normal/", 9, 11, models],
-    )
-    t.start()
 
     t1 = Thread(
         target=calc_matrix,
-        args=["../w31/box2/2-07-31/events/", "../w31/box2/2-07-31/normal/", 7, 9, models],
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 22, 28, models, mod_weights],
     )
     t1.start()
 
+    t2 = Thread(
+        target=calc_matrix,
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 16, 21, models, mod_weights],
+    )
+    t2.start()
 
-calc_matrix("../w31/box2/2-07-31/events/", "../w31/box2/2-07-31/normal/", 4, 6, models)
+    t3 = Thread(
+        target=calc_matrix,
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 10, 15, models, mod_weights],
+    )
+    t3.start()
+
+calc_matrix(f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 5, 9, models, mod_weights)
 
 if not visualize:
-    t.join()
     t1.join()
+    t2.join()
+    t3.join()
 
 
 model = transform.SimilarityTransform()
 
+mod_weights = np.array(mod_weights)
 
 model.params = np.average(
     models,
@@ -203,9 +227,9 @@ print(repr(model))
 #     ]
 # )
 
-event_data = torch.load("../w31/box2/2-07-31/events/event_frames_15.pt")
+event_data = torch.load(f"../{curr_dir}/events/event_frames_6.pt")
 
-normal_cap = cv2.VideoCapture("../w31/box2/2-07-31/normal/_15.mp4")
+normal_cap = cv2.VideoCapture(f"../{curr_dir}/normal/_6.mp4")
 
 normal_cap.set(1, 4)
 img_left = event_data[4].to_dense()
@@ -213,7 +237,7 @@ ret, img_right = normal_cap.read()
 
 target_tensor = None
 
-with open(os.path.join("../w31/box2/2-07-31/labels/track/labels", "_15_4.txt")) as file:
+with open(os.path.join(f"../{curr_dir}/track/labels", "_6_4.txt")) as file:
     target_data = [
         float(value)
         for line in file
