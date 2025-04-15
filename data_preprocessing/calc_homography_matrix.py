@@ -10,8 +10,37 @@ from matplotlib import patches
 from skimage import color, exposure, feature, filters, transform, util
 
 
-visualize = False
+import math
+import os
+from pydoc import allmethods
+from matplotlib import patches
+import numpy as np
+import cv2
+import skimage
+from skimage.color import rgb2gray
+import skimage.exposure
+from skimage.feature import match_descriptors, plot_matched_features
+from skimage.measure import ransac
+import matplotlib.pyplot as plt
+from skimage.filters import rank
+from skimage.morphology import disk, ball
+from skimage.util import compare_images
+from skimage.restoration import denoise_tv_chambolle
 
+
+from skimage.feature import (
+    match_descriptors,
+    corner_peaks,
+    corner_subpix,
+    plot_matched_features,
+    BRIEF,
+)
+from skimage.color import rgb2gray
+import matplotlib.pyplot as plt
+import torch
+from tqdm import tqdm
+
+visualize = True
 img = 0
 
 
@@ -25,122 +54,128 @@ def process_clip(event_path, normal_path):
     normal_cap = cv2.VideoCapture(normal_path)
 
     matches = []
+    model = None
+
+    extractor = BRIEF()
+
     for i in tqdm(
-        range(0, 5000, 75),
+        range(0, 5000, 150),
         ncols=86,
         mininterval=0.75,
         leave=False,
     ):
-        normal_cap.set(1, 0 + i)
-        img_left2 = event_data[i + 1].to_dense()  # Read the Event frame
-        _, img_right = normal_cap.read()  # Read the Normal frame
-        # _, _ = normal_cap.read()  # Read the Normal frame
-        _, img_right2 = normal_cap.read()  # Read the Normal frame
+        for j in range(1):
+            normal_cap.set(1, i + 10 * j)
+            img_left2 = (
+                event_data[i + 10 * j + 1].to_dense() + event_data[i + 10 * j + 2].to_dense()
+            )  # Read the Event frame
+            _, img_right = normal_cap.read()  # Read the Normal frame
+            _ = normal_cap.grab()  # Read the Normal frame
+            _ = normal_cap.grab()  # Read the Normal frame
+            _ = normal_cap.grab()  # Read the Normal frame
 
-        img_left = exposure.adjust_gamma(filters.gaussian(img_left2, 12), 8)
+            _, img_right2 = normal_cap.read()  # Read the Normal frame
 
-        img_right = exposure.adjust_gamma(
-            filters.gaussian(
+            img_left = filters.gaussian(img_left2, 0.8)
+
+            img_right = filters.gaussian(
                 util.compare_images(
                     color.rgb2gray(img_right), color.rgb2gray(img_right2), method="diff"
                 ),
-                12,
-            ),
-            8,
-        )
+                0.6,
+            )
 
-        img_left = exposure.rescale_intensity(img_left)
-        img_right = exposure.rescale_intensity(img_right)
+            img_left = exposure.rescale_intensity(img_left)
+            img_right = exposure.rescale_intensity(img_right)
 
-        blobs1 = feature.blob_doh(
-            img_left, min_sigma=16, max_sigma=32, num_sigma=3, threshold_rel=0.45
-        )
-        blobs2 = feature.blob_doh(
-            img_right, min_sigma=16, max_sigma=32, num_sigma=3, threshold_rel=0.55
-        )
+            keypoints1 = corner_peaks(img_left, min_distance=2, threshold_rel=0.1)
+            keypoints2 = corner_peaks(img_right, min_distance=2, threshold_rel=0.1)
 
-        if visualize:
-            fig, axes = plt.subplots(1, 2, figsize=(12, 8))
+            extractor.extract(img_left, keypoints1)
+            keypoints1 = keypoints1[extractor.mask]
+            descriptors1 = extractor.descriptors
 
-            axes[0].imshow(img_left, cmap="magma")
-            axes[1].imshow(img_right, cmap="magma")
+            extractor.extract(img_right, keypoints2)
+            keypoints2 = keypoints2[extractor.mask]
+            descriptors2 = extractor.descriptors
 
-            for y1, x1, r1 in blobs1:
-                cirk1 = patches.Circle((x1, y1), radius=r1, linewidth=2, edgecolor="r", fill=False)
+            try:
+                matches12 = match_descriptors(
+                    descriptors1, descriptors2, cross_check=True, max_distance=2, max_ratio=0.8
+                )
 
-                axes[0].add_patch(cirk1)
+                # fig, ax = plt.subplots(nrows=1, ncols=1)
 
-            for y2, x2, r2 in blobs2:
+                # plot_matched_features(
+                #     img_left,
+                #     img_right,
+                #     keypoints0=keypoints1,
+                #     keypoints1=keypoints2,
+                #     matches=matches12,
+                #     ax=ax,
+                #     only_matches=True,
+                # )
+                # plt.show()
 
-                cirk2 = patches.Circle((x2, y2), radius=r2, linewidth=2, edgecolor="r", fill=False)
+                # tqdm.write(f"matches found {matches12.shape[0]}")
 
-                axes[1].add_patch(cirk2)
-        for y1, x1, r1 in blobs1:
-            best_match = 0.15
-            best_index = -1
-            for i, (y2, x2, r2) in enumerate(blobs2):
-                error = math.dist((x1 / 640, y1 / 480), (x2 / 736, y2 / 460))
-                if error < best_match:
-                    best_match = error
-                    best_index = i
+                new_model, inliers = ransac(
+                    (keypoints1[matches12[:, 0]], keypoints2[matches12[:, 1]]),
+                    skimage.transform.SimilarityTransform,
+                    min_samples=8,
+                    residual_threshold=0.6,
+                    max_trials=1500,
+                )
 
-            if best_index != -1:
-                for i, (y2, x2, r2) in enumerate(blobs1):
-                    error = math.dist(
-                        (x2 / 640, y2 / 480),
-                        (blobs2[best_index][1] / 736, blobs2[best_index][0] / 460),
+                if inliers is not None and inliers.sum() >= 2:
+
+                    fig, ax = plt.subplots(nrows=1, ncols=1)
+
+                    plot_matched_features(
+                        img_left,
+                        img_right,
+                        keypoints0=keypoints1,
+                        keypoints1=keypoints2,
+                        matches=matches12[inliers],
+                        ax=ax,
+                        only_matches=True,
                     )
-                    if error < best_match:
-                        break
-                else:
-                    model_matches += 1
-                    total_error += best_match
-                    matches.append([[x1, y1], [blobs2[best_index][1], blobs2[best_index][0]]])
-                    if visualize:
-                        conn = patches.ConnectionPatch(
-                            xyA=(x1, y1),
-                            xyB=(blobs2[best_index][1], blobs2[best_index][0]),
-                            coordsA="data",
-                            coordsB="data",
-                            axesA=axes[0],
-                            axesB=axes[1],
-                            color="lightgreen",
-                            linewidth=3,
+                    plt.show()
+
+                    if model is None:
+                        # print(repr(new_model))
+                        model = new_model
+                        normal_cap.release()
+                        return model, 1, 0.0000001
+
+                        # model.estimate(keypoints1[matches12[:, 0]], keypoints2[matches12[:, 1]])
+                    else:
+                        # new_model = transform.SimilarityTransform()
+                        # new_model.estimate(keypoints1[matches12[:, 0]], keypoints2[matches12[:, 1]])
+
+                        model.params = np.average(
+                            (model.params, new_model.params), weights=[0.95, 0.05], axis=0
                         )
+                        # print(repr(model))
 
-                        fig.add_artist(conn)
+                # for match in matches12[inliers][0]:
+                #     matches.append([keypoints1[match[0]], keypoints2[match[1]]])
 
-                        cirk1 = patches.Circle((x1, y1), radius=2, color="lightgreen", fill=True)
-                        cirk2 = patches.Circle(
-                            (blobs2[best_index][1], blobs2[best_index][0]),
-                            radius=2,
-                            color="lightgreen",
-                            fill=True,
-                        )
-
-                        axes[0].add_patch(cirk1)
-                        axes[1].add_patch(cirk2)
-
-        if visualize:
-            axes[0].axis("off")
-            axes[1].axis("off")
-            fig.tight_layout()
-            plt.show()
-            # fig.savefig(f"clips/test/{img}.png", bbox_inches="tight", pad_inches=0.1)
-            # img += 1
-
-            # plt.close(fig)
+            except:
+                continue
 
     normal_cap.release()
 
-    matches = np.array(matches)
-    model = transform.SimilarityTransform()
-    weight = 0.000001
-    if len(matches) > 32:
-        model.estimate(matches[:, 0], matches[:, 1])
-        weight = 0.5 * model_matches + 0.5 * (1 - total_error)
+    # matches = np.array(matches)
+    # model = transform.SimilarityTransform()
+    # weight = 0.000001
+    # if len(matches) > 1:
 
-    return model, weight, total_error
+    #     model.estimate(matches[:, 0], matches[:, 1])
+    #     print(model.params)
+    #     weight = 0 * model_matches + 1 * (1 - total_error)
+
+    return model, 1, 0.0000001
 
 
 def get_targets(directory, target_length, file_nr):
@@ -170,8 +205,9 @@ def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results, res_
         model, weight, total_error = process_clip(
             f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4"
         )
-        models.append(model.params)
-        weights.append(weight)
+        if model is not None:
+            models.append(model.params)
+            weights.append(weight)
 
     models = np.array(models)
     weights = np.array(weights)
@@ -182,8 +218,8 @@ def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results, res_
     model.params = np.average(
         models,
         axis=0,
-        weights=weights,
     )
+    print(repr(model))
 
     results.append(model.params)
     res_weights.append(1 - total_error)
@@ -192,7 +228,7 @@ def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results, res_
 mod_weights = []
 models = []
 
-curr_dir = "w31/box2/2-07-31"  # "w35/box1/1-09-04"
+curr_dir = "w31/box2/2-08-01"  # "w35/box1/1-09-04"
 
 # "w31/box2/2-07-31"
 # "w35/box1/1-09-04"
@@ -201,19 +237,19 @@ if not visualize:
 
     t1 = Thread(
         target=calc_matrix,
-        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 22, 28, models, mod_weights],
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 22, 25, models, mod_weights],
     )
     t1.start()
 
     t2 = Thread(
         target=calc_matrix,
-        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 16, 21, models, mod_weights],
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 16, 19, models, mod_weights],
     )
     t2.start()
 
     t3 = Thread(
         target=calc_matrix,
-        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 10, 15, models, mod_weights],
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 10, 14, models, mod_weights],
     )
     t3.start()
 
@@ -229,23 +265,23 @@ model = transform.SimilarityTransform()
 
 
 mod_weights = np.array(mod_weights)
+mod_weights = mod_weights / mod_weights.sum()
 
-model.params = np.average(
-    models,
-    axis=0,
-    weights=[1 / len(models)] * len(models),
-)
+model.params = np.average(models, axis=0)
+
+# model.params = model.inverse.params
 
 print(repr(model))
 
 # model = transform.SimilarityTransform()
 # model.params = np.array(
 #     [
-#         [8.32694435e-01, -1.24637729e-02, 1.32369730e02],
-#         [1.24637729e-02, 8.32694435e-01, 6.27525193e01],
+#         [1.03138823e00, 5.43905205e-03, 6.67418124e00],
+#         [-5.43905205e-03, 1.03138823e00, 3.32507537e01],
 #         [0.00000000e00, 0.00000000e00, 1.00000000e00],
 #     ]
 # )
+
 
 event_data = torch.load(f"../{curr_dir}/events/event_frames_6.pt")
 
@@ -260,7 +296,7 @@ target_tensors = get_targets(f"../{curr_dir}/track/labels/", 5400, 6)
 # axes[1].imshow(img_right, cmap="brg")
 
 out = cv2.VideoWriter(
-    filename=f"homography-vis.mp4",
+    filename=f"homography-vis3.mp4",
     fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
     fps=90,
     frameSize=(
@@ -272,7 +308,7 @@ out = cv2.VideoWriter(
 
 
 for frame_idx in tqdm(
-    range(int(len(event_data))),
+    range(int(len(event_data)) // 3),
     desc=f"annotating frames",
     ncols=86,
     mininterval=0.25,
@@ -297,10 +333,10 @@ for frame_idx in tqdm(
         x_min, y_min = np.array([center_x, center_y]) - [w / 2, h / 2]
         x_max, y_max = np.array([center_x, center_y]) + [w / 2, h / 2]
 
-        x_min, y_min = model._apply_mat((x_min, y_min), model.inverse.params)[0]
-        x_max, y_max = model._apply_mat((x_max, y_max), model.inverse.params)[0]
+        y_min, x_min = model._apply_mat((y_min, x_min), model.inverse.params)[0]
+        y_max, x_max = model._apply_mat((y_max, x_max), model.inverse.params)[0]
 
-        center_x, center_y = model._apply_mat((center_x, center_y), model.inverse.params)[0]
+        center_y, center_x = model._apply_mat((center_y, center_x), model.inverse.params)[0]
 
         cv2.rectangle(
             img=combined_frame,
