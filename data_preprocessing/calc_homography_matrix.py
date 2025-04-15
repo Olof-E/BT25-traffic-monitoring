@@ -1,60 +1,36 @@
 import os
 from threading import Thread
 import cv2
-import math
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from matplotlib import patches
-from skimage import color, exposure, feature, filters, transform, util
+from skimage import color, exposure, filters, transform, util
 
 
-import math
-import os
-from pydoc import allmethods
-from matplotlib import patches
-import numpy as np
-import cv2
-import skimage
-from skimage.color import rgb2gray
-import skimage.exposure
 from skimage.feature import match_descriptors, plot_matched_features
 from skimage.measure import ransac
 import matplotlib.pyplot as plt
-from skimage.filters import rank
-from skimage.morphology import disk, ball
-from skimage.util import compare_images
-from skimage.restoration import denoise_tv_chambolle
 
 
 from skimage.feature import (
     match_descriptors,
     corner_peaks,
-    corner_subpix,
     plot_matched_features,
     BRIEF,
 )
-from skimage.color import rgb2gray
 import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
 
-visualize = True
-img = 0
+visualize = False
 
 
 def process_clip(event_path, normal_path):
-    global img
     torch.cuda.set_device(device=0)
-    model_matches = 0
-    total_error = 0
     event_data = torch.load(event_path)
 
     normal_cap = cv2.VideoCapture(normal_path)
-
-    matches = []
-    model = None
 
     extractor = BRIEF()
 
@@ -64,7 +40,7 @@ def process_clip(event_path, normal_path):
         mininterval=0.75,
         leave=False,
     ):
-        for j in range(1):
+        for j in range(2):
             normal_cap.set(1, i + 10 * j)
             img_left2 = (
                 event_data[i + 10 * j + 1].to_dense() + event_data[i + 10 * j + 2].to_dense()
@@ -121,7 +97,7 @@ def process_clip(event_path, normal_path):
 
                 new_model, inliers = ransac(
                     (keypoints1[matches12[:, 0]], keypoints2[matches12[:, 1]]),
-                    skimage.transform.SimilarityTransform,
+                    transform.SimilarityTransform,
                     min_samples=8,
                     residual_threshold=0.6,
                     max_trials=1500,
@@ -129,53 +105,28 @@ def process_clip(event_path, normal_path):
 
                 if inliers is not None and inliers.sum() >= 2:
 
-                    fig, ax = plt.subplots(nrows=1, ncols=1)
+                    # fig, ax = plt.subplots(nrows=1, ncols=1)
 
-                    plot_matched_features(
-                        img_left,
-                        img_right,
-                        keypoints0=keypoints1,
-                        keypoints1=keypoints2,
-                        matches=matches12[inliers],
-                        ax=ax,
-                        only_matches=True,
-                    )
-                    plt.show()
+                    # plot_matched_features(
+                    #     img_left,
+                    #     img_right,
+                    #     keypoints0=keypoints1,
+                    #     keypoints1=keypoints2,
+                    #     matches=matches12[inliers],
+                    #     ax=ax,
+                    #     only_matches=True,
+                    # )
+                    # plt.show()
 
-                    if model is None:
-                        # print(repr(new_model))
-                        model = new_model
-                        normal_cap.release()
-                        return model, 1, 0.0000001
-
-                        # model.estimate(keypoints1[matches12[:, 0]], keypoints2[matches12[:, 1]])
-                    else:
-                        # new_model = transform.SimilarityTransform()
-                        # new_model.estimate(keypoints1[matches12[:, 0]], keypoints2[matches12[:, 1]])
-
-                        model.params = np.average(
-                            (model.params, new_model.params), weights=[0.95, 0.05], axis=0
-                        )
-                        # print(repr(model))
-
-                # for match in matches12[inliers][0]:
-                #     matches.append([keypoints1[match[0]], keypoints2[match[1]]])
+                    normal_cap.release()
+                    return new_model
 
             except:
                 continue
 
     normal_cap.release()
 
-    # matches = np.array(matches)
-    # model = transform.SimilarityTransform()
-    # weight = 0.000001
-    # if len(matches) > 1:
-
-    #     model.estimate(matches[:, 0], matches[:, 1])
-    #     print(model.params)
-    #     weight = 0 * model_matches + 1 * (1 - total_error)
-
-    return model, 1, 0.0000001
+    return None
 
 
 def get_targets(directory, target_length, file_nr):
@@ -197,22 +148,15 @@ def get_targets(directory, target_length, file_nr):
     return target_tensors
 
 
-def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results, res_weights):
+def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results):
 
     models = []
-    weights = []
     for i in range(start_clip, end_clip + 1):
-        model, weight, total_error = process_clip(
-            f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4"
-        )
+        model = process_clip(f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4")
         if model is not None:
             models.append(model.params)
-            weights.append(weight)
 
     models = np.array(models)
-    weights = np.array(weights)
-
-    weights = weights / weights.sum()
 
     model = transform.SimilarityTransform()
     model.params = np.average(
@@ -222,13 +166,11 @@ def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results, res_
     print(repr(model))
 
     results.append(model.params)
-    res_weights.append(1 - total_error)
 
 
-mod_weights = []
 models = []
 
-curr_dir = "w31/box2/2-08-01"  # "w35/box1/1-09-04"
+curr_dir = "w31/box2/2-07-31"  # "w35/box1/1-09-04"
 
 # "w31/box2/2-07-31"
 # "w35/box1/1-09-04"
@@ -237,23 +179,23 @@ if not visualize:
 
     t1 = Thread(
         target=calc_matrix,
-        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 22, 25, models, mod_weights],
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 22, 25, models],
     )
     t1.start()
 
     t2 = Thread(
         target=calc_matrix,
-        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 16, 19, models, mod_weights],
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 16, 19, models],
     )
     t2.start()
 
     t3 = Thread(
         target=calc_matrix,
-        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 10, 14, models, mod_weights],
+        args=[f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 10, 14, models],
     )
     t3.start()
 
-calc_matrix(f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 5, 9, models, mod_weights)
+calc_matrix(f"../{curr_dir}/events/", f"../{curr_dir}/normal/", 5, 9, models)
 
 if not visualize:
     t1.join()
@@ -264,24 +206,9 @@ if not visualize:
 model = transform.SimilarityTransform()
 
 
-mod_weights = np.array(mod_weights)
-mod_weights = mod_weights / mod_weights.sum()
-
 model.params = np.average(models, axis=0)
 
-# model.params = model.inverse.params
-
 print(repr(model))
-
-# model = transform.SimilarityTransform()
-# model.params = np.array(
-#     [
-#         [1.03138823e00, 5.43905205e-03, 6.67418124e00],
-#         [-5.43905205e-03, 1.03138823e00, 3.32507537e01],
-#         [0.00000000e00, 0.00000000e00, 1.00000000e00],
-#     ]
-# )
-
 
 event_data = torch.load(f"../{curr_dir}/events/event_frames_6.pt")
 
@@ -290,13 +217,9 @@ normal_cap = cv2.VideoCapture(f"../{curr_dir}/normal/_6.mp4")
 
 target_tensors = get_targets(f"../{curr_dir}/track/labels/", 5400, 6)
 
-# fig, axes = plt.subplots(1, 2, figsize=(12, 8))
-
-# axes[0].imshow(img_left, cmap="gray")
-# axes[1].imshow(img_right, cmap="brg")
 
 out = cv2.VideoWriter(
-    filename=f"homography-vis3.mp4",
+    filename=f"homography-vis2.mp4",
     fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
     fps=90,
     frameSize=(
@@ -345,12 +268,6 @@ for frame_idx in tqdm(
             color=(255, 0, 0),
             thickness=2,
         )
-        # rect = patches.Rectangle(
-        #     (x_min, y_min), x_max - x_min, y_max - y_min, linewidth=1, edgecolor="r", facecolor="none"
-        # )
-        # cirk = patches.Circle((center_x, center_y), radius=1, edgecolor="r", facecolor="red")
-        # axes[0].add_patch(rect)
-        # axes[0].add_patch(cirk)
 
         # ===========================
         # Normal Image
@@ -368,15 +285,8 @@ for frame_idx in tqdm(
             thickness=2,
         )
 
-        # rect = patches.Rectangle((x_min, y_min), w, h, linewidth=1, edgecolor="r", facecolor="none")
-        # cirk = patches.Circle((center_x, center_y), radius=1, edgecolor="r", facecolor="red")
-        # axes[1].add_patch(rect)
-        # axes[1].add_patch(cirk)
     out.write(np.uint8(combined_frame))
 
-
-# plt.tight_layout()
-# plt.show()
 
 out.release()
 normal_cap.release()
