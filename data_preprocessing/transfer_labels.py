@@ -1,3 +1,4 @@
+import argparse
 from concurrent.futures import thread
 from math import exp
 from pathlib import Path
@@ -211,7 +212,7 @@ def process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize)
     out = None
     if visualize:
         out = cv2.VideoWriter(
-            filename=f"{save_dir}{j}-vis.mp4",
+            filename=f"{save_dir}{i+j}-vis.mp4",
             fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
             fps=90,
             frameSize=(
@@ -221,56 +222,58 @@ def process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize)
             isColor=True,
         )
 
-    for frame_idx in tqdm(
+    with tqdm(
         range(int(len(data))),
-        desc=f"annotating frames",
+        desc="annotating frames",
         ncols=86,
         mininterval=0.25,
-    ):
-        frame = data[frame_idx].to_dense()[roi[1] : roi[3], roi[0] : roi[2]]
-        warped = []
+    ) as t:
+        for frame_idx in t:
+            frame = data[frame_idx].to_dense()[roi[1] : roi[3], roi[0] : roi[2]]
+            warped = []
 
-        if targets[frame_idx] == None:
-            print("missing:", frame_idx)
-            res = frame.detach().clone()
+            t.set_description("annotating frames")
+            if targets[frame_idx] == None:
+                t.set_description(f"missing: {frame_idx}")
+                res = frame.detach().clone()
 
-        elif len(targets[frame_idx]) == 0:
-            res = frame.detach().clone()
+            elif len(targets[frame_idx]) == 0:
+                res = frame.detach().clone()
 
-        else:
-            for tar in range(len(targets[frame_idx])):
-                x, y = targets[frame_idx][tar][1:3] * torch.tensor([736, 460])
-                w, h = targets[frame_idx][tar][3:] * torch.tensor([736, 460])
+            else:
+                for tar in range(len(targets[frame_idx])):
+                    x, y = targets[frame_idx][tar][1:3] * torch.tensor([736, 460])
+                    w, h = targets[frame_idx][tar][3:] * torch.tensor([736, 460])
 
-                x_min, y_min = np.array([x, y]) - [w / 2, h / 2]
-                x_max, y_max = np.array([x, y]) + [w / 2, h / 2]
+                    x_min, y_min = np.array([x, y]) - [w / 2, h / 2]
+                    x_max, y_max = np.array([x, y]) + [w / 2, h / 2]
 
-                y_min, x_min = H._apply_mat((y_min, x_min), H.inverse.params)[0]
-                y_max, x_max = H._apply_mat((y_max, x_max), H.inverse.params)[0]
-                w = x_max - x_min
-                h = y_max - y_min
+                    y_min, x_min = H._apply_mat((y_min, x_min), H.inverse.params)[0]
+                    y_max, x_max = H._apply_mat((y_max, x_max), H.inverse.params)[0]
+                    w = x_max - x_min
+                    h = y_max - y_min
 
-                transformed_coordinates = H._apply_mat((y, x), H.inverse.params)[0]
-                warped.append(
-                    [
-                        targets[frame_idx][tar][0],
-                        np.flip(transformed_coordinates),
-                        torch.tensor([w, h]),
-                    ]
+                    transformed_coordinates = H._apply_mat((y, x), H.inverse.params)[0]
+                    warped.append(
+                        [
+                            targets[frame_idx][tar][0],
+                            np.flip(transformed_coordinates),
+                            torch.tensor([w, h]),
+                        ]
+                    )
+
+                res, overlays = annotate_frame(
+                    frame, warped, overlays, out, roi, clip_maximum, visualize
                 )
 
-            res, overlays = annotate_frame(
-                frame, warped, overlays, out, roi, clip_maximum, visualize
-            )
+            frames_tensor.append(res)
+            for trck_class in tracked_classes:
+                labels_tensor[trck_class].append(overlays[trck_class].detach().clone())
 
-        frames_tensor.append(res)
-        for trck_class in tracked_classes:
-            labels_tensor[trck_class].append(overlays[trck_class].detach().clone())
-
-    print(f"\nSaving visualization to \x1b[1m{save_dir}{j}-vis.mp4\x1b[22m")
+    print(f"\nSaving visualization to \x1b[1m{save_dir}{i+j}-vis.mp4\x1b[22m")
     if visualize:
         out.release()
-    print(f"\nSaving data to \x1b[1m{save_dir}{j}.pt\x1b[22m")
+    print(f"\nSaving data to \x1b[1m{save_dir}{i+j}.pt\x1b[22m")
     clip_data = [torch.stack(frames_tensor).to_sparse()]
 
     for trck_class in tracked_classes:
@@ -278,7 +281,7 @@ def process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize)
 
     torch.save(
         clip_data,
-        f"{save_dir}{j}.pt",
+        f"{save_dir}{i+j}.pt",
     )
 
 
@@ -304,7 +307,41 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
         #     threads[j].join()
 
 
-generate_labels("../w35/box1/1-09-04/", "../clips/frames_with_labels/", 4, 5, True)
+parser = argparse.ArgumentParser(
+    description="A script that creates the training dataset",
+    usage="%(prog)s <path/to/data/> <path/to/output/> [options]",
+)
+
+parser.add_argument("input_dir", help="The path to the directory containing the event data")
+parser.add_argument(
+    "output_dir", help="The path to the directory where the generated data should be saved"
+)
+
+parser.add_argument(
+    "-s",
+    "--start-clip",
+    required=True,
+    type=int,
+    help="The clip to start generating training data from (Required)",
+)
+parser.add_argument(
+    "-e",
+    "--end-clip",
+    type=int,
+    required=True,
+    help="The clip to stop generating training data at (Required)",
+)
+parser.add_argument(
+    "--save-vid",
+    action="store_true",
+    default=False,
+    help="Can be set to also generate .mp4 files of the generated training data (default: %(default)s)",
+)
+
+args = parser.parse_args()
+
+
+generate_labels(args.input_dir, args.output_dir, args.start_clip, args.end_clip, args.save_vid)
 
 # w35/box1/1-09-04
 # w38/box3/3-09-27/
