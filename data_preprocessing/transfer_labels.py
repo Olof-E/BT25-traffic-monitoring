@@ -2,6 +2,7 @@ from concurrent.futures import thread
 from math import exp
 from pathlib import Path
 from threading import Thread
+import warnings
 import cv2
 import torch
 import numpy as np
@@ -26,6 +27,8 @@ torch.cuda.set_device(0)
 # 7 - Truck
 
 tracked_classes = [0, 2, 5, 7]
+
+warnings.filterwarnings("ignore", message="__array_wrap__*")
 
 
 def get_targets(directory, target_length, file_nr):
@@ -187,8 +190,7 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
 
 H = None
 
-# x_min, y_min, x_max, y_max
-rois = [(47 - 35, 137 - 10, 303 - 35, 393 - 10), (635 - 256, 137 - 10, 635, 393 - 10)]  # []
+rois = None
 
 
 def process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize):
@@ -281,8 +283,10 @@ def process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize)
 
 
 def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
-    global H
+    global H, rois
     threads = [None, None]
+
+    rois = np.load(f"{input_dir}rois.npy")
 
     H = transform.SimilarityTransform()
     H.params = np.load(f"{input_dir}homography-matrix.npy")  # calc_H_matrix(input_dir, 4, 29, True)
