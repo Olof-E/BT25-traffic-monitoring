@@ -1,3 +1,5 @@
+import argparse
+import os
 import time
 import torch
 import torch.nn as nn
@@ -167,182 +169,221 @@ for layer_nr in nr_par_last_layer_list:
             output_frame, target_frame * 1000
         )  # Multiplication due to the numbers being too small, should be fixed when creating the data
 
-        if print_image:
-            save_current_result(output_frame, target_frame, frames, step, class_id)
+        # if print_image:
+        #     save_current_result(output_frame, target_frame, frames, step, class_id)
 
         return mse_loss
 
         # if print_image:
         #     save_current_result(output_frame, target_frame, frames, step)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SNN().to(device)
+    data_dirs = ["w35-1-09-14"]
 
-    optimizer = torch.optim.NAdam(
-        model.parameters(), lr=lr, weight_decay=w_decay, decoupled_weight_decay=True
-    )
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    def start_training(training_data_dir, output_dir, num_epochs):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = SNN().to(device)
 
-    # Print data of the model
-    print(f"Total trainable parameters: {trainable_params}")
-    trainable_weights = sum(
-        p.numel() for name, p in model.named_parameters() if p.requires_grad and "weight" in name
-    )
+        optimizer = torch.optim.NAdam(
+            model.parameters(), lr=lr, weight_decay=w_decay, decoupled_weight_decay=True
+        )
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print(f"Total trainable weights: {trainable_weights}")
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            param_type = "weights" if "weight" in name else "biases"
-            print(f"Layer: {name} | Type: {param_type} | Number of Parameters: {param.numel()}")
+        # Print data of the model
+        print(f"Total trainable parameters: {trainable_params}")
+        trainable_weights = sum(
+            p.numel()
+            for name, p in model.named_parameters()
+            if p.requires_grad and "weight" in name
+        )
 
-    print("===================================================")
-    num_epochs = 8
-    frame_size = (64, 64)
-    sequence_length = 75
-    train_loss_list = []
-    val_loss_list = []
-    overlap = 25
+        print(f"Total trainable weights: {trainable_weights}")
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                param_type = "weights" if "weight" in name else "biases"
+                print(f"Layer: {name} | Type: {param_type} | Number of Parameters: {param.numel()}")
 
-    best_val = 999999
+        print("===================================================")
+        frame_size = (64, 64)
+        sequence_length = 75
+        train_loss_list = []
+        val_loss_list = []
+        overlap = 25
 
-    for epoch in range(num_epochs):
-        train_loss = 0
-        num_train_batches = 0
-        model.train()
-        start = time.time()
+        best_val = 999999
 
-        for data_nr in range(0, 78):
-            data = get_data(data_nr)
+        for epoch in range(num_epochs):
+            train_loss = 0
+            num_train_batches = 0
+            model.train()
+            start = time.time()
 
-            if data is not None:
-                train_data, val_data = data
-                print(
-                    f"\rRunning Epoch {epoch + 1} | File {data_nr} has been loaded. Training mode.",
-                    end="",
-                )
-                train_loader = train_data
+            for curr_dir in data_dirs:
+                curr_dir = os.path.join(training_data_dir, curr_dir)
+                data_files = [
+                    (os.path.join(curr_dir, f), f)
+                    for f in os.listdir(curr_dir)
+                    if f.endswith(".pt")
+                ]
+                for i, (data_path, file_name) in enumerate(data_files):
+                    data = get_data(data_path)
 
-                for i, (frames, targets) in enumerate(train_loader):
-                    # print("Frames")
-                    # print(repr(np.array(frames).shape))
-                    # print("Targets")
-                    # print(repr(np.array(targets).shape))
-                    mem_states = (None, None, None, None, None, None, None)
-
-                    optimizer.zero_grad()
-
-                    frames, targets = frames.to(device), targets.to(device)
-
-                    loss = 0
-
-                    for step in range(sequence_length):
-                        input_frame = frames[:, step].unsqueeze(1)
-                        output1, output2, output3, output4, mem_states = model(
-                            input_frame, mem_states
+                    if data is not None:
+                        train_data, val_data = data
+                        print(
+                            f"\rRunning Epoch {epoch + 1} | File {file_name} has been loaded. Training mode.",
+                            end="",
                         )
-                        # print(output.shape)
+                        train_loader = train_data
 
-                        if step >= overlap:
-                            final_output1 = output1.view(8, 64, 64)
-                            final_output2 = output2.view(8, 64, 64)
-                            final_output3 = output3.view(8, 64, 64)
-                            final_output4 = output4.view(8, 64, 64)
+                        for i, (frames, targets) in enumerate(train_loader):
+                            # print("Frames")
+                            # print(repr(np.array(frames).shape))
+                            # print("Targets")
+                            # print(repr(np.array(targets).shape))
+                            mem_states = (None, None, None, None, None, None, None)
 
-                            # print(targets.shape)
+                            optimizer.zero_grad()
 
-                            loss += (
-                                2
-                                * loss_fn(final_output1, targets[:, 0, step], step, 0)
-                                / (sequence_length - overlap)
-                                + 0.5
-                                * loss_fn(final_output2, targets[:, 1, step], step, 2)
-                                / (sequence_length - overlap)
-                                + 2.2
-                                * loss_fn(final_output3, targets[:, 2, step], step, 5)
-                                / (sequence_length - overlap)
-                                + 0.9
-                                * loss_fn(final_output4, targets[:, 3, step], step, 7)
-                                / (sequence_length - overlap)
-                            )  # only train on the last 50 frames
+                            frames, targets = frames.to(device), targets.to(device)
 
-                    loss.backward()
-                    optimizer.step()
+                            loss = 0
 
-                    train_loss += loss.item()
-                    num_train_batches += 1
+                            for step in range(sequence_length):
+                                input_frame = frames[:, step].unsqueeze(1)
+                                output1, output2, output3, output4, mem_states = model(
+                                    input_frame, mem_states
+                                )
+                                # print(output.shape)
 
-        model.eval()
-        val_loss = 0
-        num_test_batches = 0
-        with torch.no_grad():
-            for data_nr in range(0, 78):
-                data = get_data(data_nr)
+                                if step >= overlap:
+                                    final_output1 = output1.view(16, 64, 64)
+                                    final_output2 = output2.view(16, 64, 64)
+                                    final_output3 = output3.view(16, 64, 64)
+                                    final_output4 = output4.view(16, 64, 64)
 
-                if data is not None:
-                    train_data, val_data = data
-                    print(
-                        f"\rRunning Epoch {epoch + 1} | File {data_nr} has been loaded. Validation mode.",
-                        end="",
-                    )
-                    validation_loader = val_data
+                                    # print(targets.shape)
 
-                    for i, (frames, targets) in enumerate(validation_loader):
-                        mem_states = (None, None, None, None, None, None, None)
+                                    loss += (
+                                        2
+                                        * loss_fn(final_output1, targets[:, 0, step], step, 0)
+                                        / (sequence_length - overlap)
+                                        + 0.5
+                                        * loss_fn(final_output2, targets[:, 1, step], step, 2)
+                                        / (sequence_length - overlap)
+                                        + 1.4
+                                        * loss_fn(final_output3, targets[:, 2, step], step, 5)
+                                        / (sequence_length - overlap)
+                                        + 0.9
+                                        * loss_fn(final_output4, targets[:, 3, step], step, 7)
+                                        / (sequence_length - overlap)
+                                    )  # only train on the last 50 frames
 
-                        frames, targets = frames.to(device), targets.to(device)
-                        loss = 0
+                            loss.backward()
+                            optimizer.step()
 
-                        for step in range(sequence_length):
-                            input_frame = frames[:, step].unsqueeze(1)
-                            output1, output2, output3, output4, mem_states = model(
-                                input_frame, mem_states
+                            train_loss += loss.item()
+                            num_train_batches += 1
+
+            model.eval()
+            val_loss = 0
+            num_test_batches = 0
+            with torch.no_grad():
+                for curr_dir in data_dirs:
+                    curr_dir = os.path.join(training_data_dir, curr_dir)
+                    data_files = [
+                        (os.path.join(curr_dir, f), f)
+                        for f in os.listdir(curr_dir)
+                        if f.endswith(".pt")
+                    ]
+                    for i, (data_path, file_name) in enumerate(data_files):
+                        data = get_data(data_path)
+
+                        if data is not None:
+                            train_data, val_data = data
+                            print(
+                                f"\rRunning Epoch {epoch + 1} | File {file_name} has been loaded. Validation mode.",
+                                end="",
                             )
+                            validation_loader = val_data
 
-                            final_output1 = output1.view(8, 64, 64)
-                            final_output2 = output2.view(8, 64, 64)
-                            final_output3 = output3.view(8, 64, 64)
-                            final_output4 = output4.view(8, 64, 64)
+                            for i, (frames, targets) in enumerate(validation_loader):
+                                mem_states = (None, None, None, None, None, None, None)
 
-                            loss += (
-                                2
-                                * loss_fn(final_output1, targets[:, 0, step], step, 0)
-                                / (sequence_length - overlap)
-                                + 0.5
-                                * loss_fn(final_output2, targets[:, 1, step], step, 2)
-                                / (sequence_length - overlap)
-                                + 2.2
-                                * loss_fn(final_output3, targets[:, 2, step], step, 5)
-                                / (sequence_length - overlap)
-                                + 0.9
-                                * loss_fn(final_output4, targets[:, 3, step], step, 7)
-                                / (sequence_length - overlap)
-                            )  # only train on the last 50 frames
+                                frames, targets = frames.to(device), targets.to(device)
+                                loss = 0
 
-                        val_loss += loss.item()
-                        num_test_batches += 1
+                                for step in range(sequence_length):
+                                    input_frame = frames[:, step].unsqueeze(1)
+                                    output1, output2, output3, output4, mem_states = model(
+                                        input_frame, mem_states
+                                    )
 
-        del data
-        gc.collect()
+                                    final_output1 = output1.view(16, 64, 64)
+                                    final_output2 = output2.view(16, 64, 64)
+                                    final_output3 = output3.view(16, 64, 64)
+                                    final_output4 = output4.view(16, 64, 64)
 
-        epoch_time = time.time() - start
-        if epoch == 0:
-            print(
-                f"\x1b[0G\x1b[2KEpoch {epoch+1} | train loss: \x1b[1m{train_loss/num_train_batches:.3f}\x1b[22m | val loss \x1b[1m{val_loss/num_test_batches:.3f}\x1b[22m | finished in \x1b[1m{pretty_time(epoch_time)}\x1b[22m",
-                end="\n",
-            )
-        else:
-            print(
-                f"\x1b[2K\x1b[0GEpoch {epoch+1} | train loss: \x1b[1m{train_loss/num_train_batches:.3f}\x1b[22m | val loss \x1b[1m{val_loss/num_test_batches:.3f}\x1b[22m | finished in \x1b[1m{pretty_time(epoch_time)}\x1b[22m",
-                end="\n",
-            )
+                                    loss += (
+                                        2
+                                        * loss_fn(final_output1, targets[:, 0, step], step, 0)
+                                        / (sequence_length - overlap)
+                                        + 0.5
+                                        * loss_fn(final_output2, targets[:, 1, step], step, 2)
+                                        / (sequence_length - overlap)
+                                        + 1.4
+                                        * loss_fn(final_output3, targets[:, 2, step], step, 5)
+                                        / (sequence_length - overlap)
+                                        + 0.9
+                                        * loss_fn(final_output4, targets[:, 3, step], step, 7)
+                                        / (sequence_length - overlap)
+                                    )  # only train on the last 50 frames
 
-        train_loss_list.append(np.round(train_loss / num_train_batches, 4))
-        val_loss_list.append(np.round(val_loss / num_test_batches, 4))
+                                val_loss += loss.item()
+                                num_test_batches += 1
 
-        if val_loss / num_test_batches < best_val:
-            best_val = val_loss / num_test_batches
-            file_name = f"models/{today}_multiclass-nadamw-{epoch}-{np.round(val_loss / num_test_batches, 4)}"
+            del data
+            gc.collect()
 
-            torch.save(model.state_dict(), f"{file_name}.pth")
+            epoch_time = time.time() - start
+            if epoch == 0:
+                print(
+                    f"\x1b[0G\x1b[2KEpoch {epoch+1} | train loss: \x1b[1m{train_loss/num_train_batches:.3f}\x1b[22m | val loss \x1b[1m{val_loss/num_test_batches:.3f}\x1b[22m | finished in \x1b[1m{pretty_time(epoch_time)}\x1b[22m",
+                    end="\n",
+                )
+            else:
+                print(
+                    f"\x1b[2K\x1b[0GEpoch {epoch+1} | train loss: \x1b[1m{train_loss/num_train_batches:.3f}\x1b[22m | val loss \x1b[1m{val_loss/num_test_batches:.3f}\x1b[22m | finished in \x1b[1m{pretty_time(epoch_time)}\x1b[22m",
+                    end="\n",
+                )
 
-    k = save_data(model, train_loss_list, val_loss_list, tau_mem, today, epoch, k)
+            train_loss_list.append(np.round(train_loss / num_train_batches, 4))
+            val_loss_list.append(np.round(val_loss / num_test_batches, 4))
+
+            if val_loss / num_test_batches < best_val:
+                best_val = val_loss / num_test_batches
+                file_name = f"{output_dir}{today}_multiclass-nadamw-{epoch}-{np.round(val_loss / num_test_batches, 4)}"
+
+                torch.save(model.state_dict(), f"{file_name}.pth")
+
+        k = save_data(model, train_loss_list, val_loss_list, tau_mem, today, epoch, k)
+
+
+parser = argparse.ArgumentParser(
+    description="Trainer for traffic monitoring SNN model",
+    usage="%(prog)s <path/to/training_data/> <path/to/output_dir/> [options]",
+)
+
+parser.add_argument("input_dir", help="The path to the directory containing the training data")
+parser.add_argument(
+    "output_dir", help="The path to the directory where the model checkpoints should be saved"
+)
+parser.add_argument(
+    "--epoch",
+    default=1,
+    type=int,
+    help="The number of epochs to train the model for (default: %(default)s epoch)",
+)
+
+args = parser.parse_args()
+
+start_training(args.input_dir, args.output_dir, args.epoch)
