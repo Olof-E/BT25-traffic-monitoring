@@ -19,13 +19,27 @@ decay = False  # set true to add decay to the input events
 fps = 90
 
 
+def pretty_time(seconds):
+    if not seconds:
+        return f"0s"
+    seconds = int(seconds)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    measures = (
+        (hours, "h"),
+        (minutes, "m"),
+        (seconds, "s"),
+    )
+    return " ".join([f"{count}{unit}" for (count, unit) in measures if count])
+
+
 def bin_events(fpath, output_dir, clip_length, num_of_clips, save_vids):
     torch.cuda.set_device(device=cuda_device)
 
     read_from = 239
     last_time_high = 0
     event_buffer, read_from, last_time_high = event_streamer_c.c_fill_event_buffer(
-        f"{fpath}/events.raw", 4_000, read_from, last_time_high
+        f"{fpath}/events.raw", 20_000, read_from, last_time_high
     )
     df_timestamps = pd.read_csv(f"{fpath}/timestamps.csv")
 
@@ -77,7 +91,7 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, save_vids):
                     if event_idx >= len(event_buffer):
                         event_buffer, read_from, last_time_high = (
                             event_streamer_c.c_fill_event_buffer(
-                                f"{fpath}/events.raw", 4_000, read_from, last_time_high
+                                f"{fpath}/events.raw", 20_000, read_from, last_time_high
                             )
                         )
                         event_idx = 0
@@ -104,7 +118,7 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, save_vids):
             save_thread.start()
         else:
             tqdm.write(
-                f"Clip {clip_nr+1}/{num_of_clips} [\x1b[92m\u2713\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time))}\x1b[22m\n"
+                f"Clip {clip_nr+1}/{num_of_clips} [\x1b[92m\u2713\x1b[0m] Finished in \x1b[1m{pretty_time(proc_time)}\x1b[22m\n"
             )
         total_runtime += proc_time
 
@@ -112,9 +126,7 @@ def bin_events(fpath, output_dir, clip_length, num_of_clips, save_vids):
         save_thread.join()
 
     print("==========================================")
-    print(
-        f"Processing finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(total_runtime))}\x1b[22m"
-    )
+    print(f"Processing finished in \x1b[1m{pretty_time(total_runtime)}\x1b[22m")
     print(f"Data saved to \x1b[1m{output_dir}\x1b[22m")
 
 
@@ -145,7 +157,7 @@ def save_clip(frames, output_dir, current_clip, num_of_clips, fps, proc_time):
     save_time = time.time() - start_time
 
     tqdm.write(
-        f"\nClip {current_clip+1}/{num_of_clips} [\x1b[92m\u2713\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time+save_time))}\x1b[22m\n"
+        f"\nClip {current_clip+1}/{num_of_clips} [\x1b[92m\u2713\x1b[0m] Finished in \x1b[1m{pretty_time(proc_time+save_time)}\x1b[22m\n"
     )
 
 
@@ -163,14 +175,14 @@ parser.add_argument(
     "--clips_count",
     default=1,
     type=int,
-    help="The number of videos/clips to cut the event frames into (default: %(default)s)",
+    help="The number of videos/clips to cut the event frames into (default: %(default)ss)",
 )
 parser.add_argument(
     "-l",
     "--length",
     default=60,
     type=int,
-    help="The desired length of the clips in seconds (default: %(default)s s)",
+    help="The desired length of the clips in seconds (default: %(default)ss)",
 )
 parser.add_argument(
     "--save-vid",

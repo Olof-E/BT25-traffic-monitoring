@@ -220,6 +220,7 @@ def calc_H_matrix(input_dir, start_clip, end_clip, save_vid=False):
         model.params = np.average(models, axis=0)
 
         print(repr(model))
+        np.save(f"{input_dir}/homography-matrix.npy", model)
 
         if save_vid:
             event_data = torch.load(f"{input_dir}events/event_frames_6.pt")
@@ -302,7 +303,6 @@ def calc_H_matrix(input_dir, start_clip, end_clip, save_vid=False):
 
             out.release()
             normal_cap.release()
-        np.save(f"{input_dir}/homography-matrix.npy", model)
 
 
 parser = argparse.ArgumentParser(

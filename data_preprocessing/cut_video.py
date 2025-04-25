@@ -8,7 +8,21 @@ from threading import Thread
 # "/home/olofeli/traffic-monit/data/clips/w31/2-08/"
 
 
-def split_video(fpath, output_dir, length, num_of_clips):
+def pretty_time(seconds):
+    if not seconds:
+        return f"0s"
+    seconds = int(seconds)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    measures = (
+        (hours, "h"),
+        (minutes, "m"),
+        (seconds, "s"),
+    )
+    return " ".join([f"{count}{unit}" for (count, unit) in measures if count])
+
+
+def split_video(fpath, output_dir, length, num_of_clips, skip_clips):
 
     cap = cv2.VideoCapture(fpath)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -25,6 +39,22 @@ def split_video(fpath, output_dir, length, num_of_clips):
     frames = []
 
     save_thread = None
+
+    # if skip_clips > 0:
+    #     for i in tqdm(
+    #         range(skip_clips * frames_per_clip),
+    #         desc="Skipping clips...",
+    #         ncols=86,
+    #         leave=False,
+    #         mininterval=0.25,
+    #         miniters=50,
+    #     ):
+    #         ret = cap.grab()
+    #         if not ret:
+    #             break
+
+    # cap.set(cv2.CAP_PROP_POS_MSEC, skip_clips * length * 1000)
+    # print(cap.get(cv2.CAP_PROP_POS_MSEC))
 
     with tqdm(
         range(frames_per_clip * num_of_clips),
@@ -55,7 +85,15 @@ def split_video(fpath, output_dir, length, num_of_clips):
 
                 save_thread = Thread(
                     target=save_clip,
-                    args=[frames.copy(), output_dir, current_clip, num_of_clips, fps, proc_time],
+                    args=[
+                        frames.copy(),
+                        output_dir,
+                        current_clip,
+                        skip_clips,
+                        num_of_clips,
+                        fps,
+                        proc_time,
+                    ],
                 )
                 save_thread.start()
 
@@ -69,10 +107,10 @@ def split_video(fpath, output_dir, length, num_of_clips):
         save_thread.join()
 
 
-def save_clip(frames, output_dir, current_clip, num_of_clips, fps, proc_time):
+def save_clip(frames, output_dir, current_clip, skip_clips, num_of_clips, fps, proc_time):
     start_time = time.time()
     out = cv2.VideoWriter(
-        f"{output_dir}_{current_clip}.mp4",
+        f"{output_dir}_{current_clip + skip_clips}.mp4",
         cv2.VideoWriter_fourcc(*"mp4v"),
         fps,
         (frames[0].shape[1], frames[0].shape[0]),
@@ -90,13 +128,13 @@ def save_clip(frames, output_dir, current_clip, num_of_clips, fps, proc_time):
     save_time = time.time() - start_time
 
     tqdm.write(
-        f"Clip {current_clip+1}/{num_of_clips} [\x1b[92m\u2713\x1b[0m] Finished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(proc_time+save_time))}\x1b[22m\n"
+        f"Clip {current_clip+1}/{num_of_clips} [\x1b[92m\u2713\x1b[0m] Finished in \x1b[1m{pretty_time(proc_time+save_time)}\x1b[22m\n"
     )
 
 
 parser = argparse.ArgumentParser(
     description="A script that reads a video file and downscales and cuts it into a desired amount of clips and length",
-    usage="%(prog)s <path/to/event_file> <path/to/output_dir/> [options]",
+    usage="%(prog)s <path/to/video_file> <path/to/output_dir/> [options]",
 )
 
 parser.add_argument("filename", help="The path to the source video file")
@@ -116,15 +154,22 @@ parser.add_argument(
     help="The desired length of the clips in seconds (default: %(default)s s)",
 )
 
+parser.add_argument(
+    "--skip",
+    default=0,
+    type=int,
+    help="The number of clips to skip at beginning before starting processing (default: %(default)s)",
+)
+
 args = parser.parse_args()
 
 start_time = time.time()
-split_video(args.filename, args.output_dir, args.length, args.clips_count)
+split_video(args.filename, args.output_dir, args.length, args.clips_count, args.skip)
 
 total_runtime = time.time() - start_time
 
 print("=================================================")
-print(f"\nFinished in \x1b[1m{time.strftime('%Mm %Ss', time.gmtime(total_runtime))}\x1b[22m")
+print(f"\nFinished in \x1b[1m{pretty_time(total_runtime)}\x1b[22m")
 print(f"Clips saved to: \x1b[1m{args.output_dir}\x1b[22m")
 
 # yolo track model="yolo/yolo11n.pt" source="2-08/_8.mp4" conf=0.3, iou=0.35 project="yolo/results/" save_txt=true device="cuda:0" batch=64 half verbose=False
