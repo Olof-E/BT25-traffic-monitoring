@@ -53,19 +53,17 @@ def get_targets(directory, target_length, file_nr):
 
 def count_events(frame, min_max, class_type):
     y_min, y_max, x_min, x_max = min_max
-    if class_type == 0:
-        x_min -= 7
-        x_max += 7
-        y_min -= 7
-        y_max += 7
     number_of_events = torch.sum(frame > 0)
     min_events_threshold = max(
-        1, (0.0025 if class_type == 0 else 0.01) * ((x_max - x_min) * (y_max - y_min))
+        1, (0.002 if class_type == 0 else 0.01) * ((x_max - x_min) * (y_max - y_min))
     )  # Dynamic minimum based on bbox area
     if number_of_events < min_events_threshold:
         ratio = 0
     else:
-        ratio = (number_of_events - min_events_threshold) / ((x_max - x_min) * (y_max - y_min))
+        ratio = (number_of_events - min_events_threshold) / (
+            (x_max - x_min) * (y_max - y_min) + 0.000000001
+        )
+
     return ratio
 
 
@@ -97,13 +95,22 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
             [0, 0], np.minimum([256, 256], np.array([center_x, center_y]) + [w / 2, h / 2])
         )
 
-        cv2.rectangle(
-            img=tempframe,
-            pt1=(int(x_min), int(y_min)),
-            pt2=(int(x_max), int(y_max)),
-            color=(0, 0, 255),
-            thickness=1,
-        )
+        if class_type == 0:
+            cv2.rectangle(
+                img=tempframe,
+                pt1=(int(max(0, x_min - 3)), int(max(0, y_min - 3))),
+                pt2=(int(min(256, x_max + 3)), int(min(256, y_max + 3))),
+                color=(0, 0, 255),
+                thickness=1,
+            )
+        else:
+            cv2.rectangle(
+                img=tempframe,
+                pt1=(int(x_min), int(y_min)),
+                pt2=(int(x_max), int(y_max)),
+                color=(0, 0, 255),
+                thickness=1,
+            )
 
         # Scale down the values to the 256x256 frame
         w_small = torch.tensor(((x_max - x_min) / 256) * 64)
@@ -114,11 +121,26 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
         # Adjust sigma proportionally for the smaller frame
         sigma_x_small = w_small / (4 if class_type == 0 else 6)
         sigma_y_small = h_small / (4 if class_type == 0 else 6)
-        events_factor = count_events(
-            frame[int(y_min) : int(y_max), int(x_min) : int(x_max)],
-            (y_min, y_max, x_min, x_max),
-            class_type,
-        )
+
+        if class_type == 0:
+
+            events_factor = count_events(
+                frame[
+                    max(0, int(y_min) - 3) : max(0, int(y_max) - 3),
+                    min(255, int(x_min) + 3) : min(255, int(x_max) + 3),
+                ],
+                (y_min, y_max, x_min, x_max),
+                class_type,
+            )
+        else:
+            events_factor = count_events(
+                frame[
+                    int(y_min) : int(y_max),
+                    int(x_min) : int(x_max),
+                ],
+                (y_min, y_max, x_min, x_max),
+                class_type,
+            )
 
         # Create Gaussian mask on the smaller frame
         X, Y = np.meshgrid(
@@ -184,7 +206,7 @@ def annotate_frame(frame, targets, overlays, out, roi, clip_maximum, visualize):
                 tempframe = np.concatenate(
                     (tempframe, scaledLabel, np.full((256, 20, 3), 255)), axis=1
                 )
-        out.write(tempframe.astype(np.uint8))
+        out.write(np.uint8(tempframe))
 
     return frame.detach().clone(), overlays
 
@@ -212,7 +234,7 @@ def process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize)
     out = None
     if visualize:
         out = cv2.VideoWriter(
-            filename=f"{save_dir}{i+j}-vis.mp4",
+            filename=f"{save_dir}{i}-{j}-vis.mp4",
             fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
             fps=90,
             frameSize=(
@@ -270,10 +292,10 @@ def process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize)
             for trck_class in tracked_classes:
                 labels_tensor[trck_class].append(overlays[trck_class].detach().clone())
 
-    print(f"\nSaving visualization to \x1b[1m{save_dir}{i+j}-vis.mp4\x1b[22m")
+    print(f"\nSaving visualization to \x1b[1m{save_dir}{i}-{j}-vis.mp4\x1b[22m")
     if visualize:
         out.release()
-    print(f"\nSaving data to \x1b[1m{save_dir}{i+j}.pt\x1b[22m")
+    print(f"\nSaving data to \x1b[1m{save_dir}{i}-{j}.pt\x1b[22m")
     clip_data = [torch.stack(frames_tensor).to_sparse()]
 
     for trck_class in tracked_classes:
@@ -281,11 +303,15 @@ def process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize)
 
     torch.save(
         clip_data,
-        f"{save_dir}{i+j}.pt",
+        f"{save_dir}{i}-{j}.pt",
     )
 
 
-def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
+def stack_via_numpy1(tensor_list):
+    return torch.from_numpy(np.array([ten.numpy() for ten in tensor_list]))
+
+
+def generate_labels(input_dir, save_dir, start_clip, end_clip, only_roi, visualize):
     global H, rois
     threads = [None, None]
 
@@ -297,6 +323,8 @@ def generate_labels(input_dir, save_dir, start_clip, end_clip, visualize):
     Path(save_dir).mkdir(parents=True, exist_ok=True)
     for i in range(start_clip, end_clip + 1):
         for j, roi in enumerate(rois):
+            if only_roi and j != only_roi - 1:
+                continue
             process_roi(i, j, roi, start_clip, end_clip, input_dir, save_dir, visualize)
         #     threads[j] = Thread(
         #         target=process_roi,
@@ -331,6 +359,13 @@ parser.add_argument(
     required=True,
     help="The clip to stop generating training data at (Required)",
 )
+
+parser.add_argument(
+    "--roi",
+    type=int,
+    help="Choose specific ROI to only generate data for",
+)
+
 parser.add_argument(
     "--save-vid",
     action="store_true",
@@ -341,7 +376,9 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-generate_labels(args.input_dir, args.output_dir, args.start_clip, args.end_clip, args.save_vid)
+generate_labels(
+    args.input_dir, args.output_dir, args.start_clip, args.end_clip, args.roi, args.save_vid
+)
 
 # w35/box1/1-09-04
 # w38/box3/3-09-27/
