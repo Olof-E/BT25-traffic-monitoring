@@ -1,11 +1,10 @@
-import gc
 import numpy as np
 import torch
 import tqdm as tqdm
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold, train_test_split
 from torch.utils.data import Dataset, DataLoader
 
-sequence_length, overlap_length, batch_size = 75, 25, 8
+sequence_length, overlap_length, batch_size = 75, 25, 16
 
 
 class EventDataset(Dataset):
@@ -19,11 +18,8 @@ class EventDataset(Dataset):
     def __getitem__(self, idx):
         frame = self.data[idx]
         target = self.targets[idx]
-        # target2 = self.targets[idx][1]
-        # target3 = self.targets[idx][2]
-        # target4 = self.targets[idx][3]
 
-        return frame, target  # , target2, target3, target4
+        return frame, target
 
 
 def create_frame_sequences(data, sequence_length, overlap_length, batch_size):
@@ -60,9 +56,8 @@ def create_target_sequences(data, sequence_length, overlap_length, batch_size):
     return torch.from_numpy(np.asarray(sequences))
 
 
-def get_data(number):
-    # try:
-    data = torch.load(f"./clips/frames_with_labels/{number}.pt")
+def get_data(fpath):
+    data = torch.load(fpath)
     if not data[0].is_coalesced():
         data[0] = data[0].coalesce()
 
@@ -77,42 +72,44 @@ def get_data(number):
 
     frames_sequence = create_frame_sequences(
         frames_tensor, sequence_length, overlap_length, batch_size
-    )  # torch.Size([536, 50, 200, 200])
+    )
 
     target_sequences = create_target_sequences(targets, sequence_length, overlap_length, batch_size)
 
-    # target_sequence = create_sequences(
-    #     targets[0], sequence_length, overlap_length, batch_size
-    # )  # torch.Size([536, 50, 64, 64])
+    # kfold = KFold(n_splits=3, shuffle=True, random_state=42)
 
-    # for i in range(4):
-    #     target_sequence = create_sequences(
-    #         targets[i], sequence_length, overlap_length, batch_size
-    #     )  # torch.Size([536, 50, 64, 64])
-    #     for j in range(len(frames_sequence)):
-    #         target_sequences[j][i] = np.append(target_sequences[j][i], target_sequence[j])
-    # print(np.array(frames_sequence).shape)
-    # print(np.array(target_sequences).shape)
+    # for train_index, test_index in kfold.split(frames_sequence):
+
+    #     X_train, X_test = frames_sequence[train_index], frames_sequence[test_index]
+    #     y_train, y_test = target_sequences[train_index], target_sequences[test_index]
 
     X_train, X_test, y_train, y_test = train_test_split(
-        frames_sequence, target_sequences, test_size=0.2, random_state=42
+        frames_sequence,
+        target_sequences,
+        test_size=0.2,
+        random_state=42,
     )
 
     dataset = EventDataset(X_train, y_train)
     test_dataset = EventDataset(X_test, y_test)
 
     train_loader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=4
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        num_workers=6,
+        pin_memory=True,
+        prefetch_factor=18,
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, drop_last=True, num_workers=4
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=True,
+        num_workers=6,
+        pin_memory=True,
+        prefetch_factor=18,
     )
 
-    # print(len(frames_tensor))
-    # print(len(frames_sequence))
     return train_loader, test_loader
-
-
-# except Exception as e:
-#     print(f"Error loading file {number}-0.pt: {e}")
-#     return None
