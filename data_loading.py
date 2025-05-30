@@ -1,10 +1,16 @@
+import random
 import numpy as np
 import torch
 import tqdm as tqdm
 from sklearn.model_selection import KFold, train_test_split
 from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+import torchvision.transforms.functional as TF
 
-sequence_length, overlap_length, batch_size = 75, 25, 16
+sequence_length, overlap_length, batch_size = 60, 25, 24
+
+
+rand = random.Random(42)
 
 
 class EventDataset(Dataset):
@@ -19,7 +25,50 @@ class EventDataset(Dataset):
         frame = self.data[idx]
         target = self.targets[idx]
 
-        return frame, target
+        return self.transform(frame, target)
+
+    def transform(self, frames, targets):
+
+        rand_region = rand.randint(0, 8)
+
+        match rand_region:
+            case 0:
+                cropped_frames = TF.center_crop(frames, (200, 200))
+                cropped_targets = TF.resize(TF.center_crop(targets, (50, 50)), (64, 64))
+
+            case 1:
+                cropped_frames = TF.crop(frames, 0, 0, 200, 200)
+                cropped_targets = TF.resize(TF.crop(targets, 0, 0, 50, 50), (64, 64))
+
+            case 2:
+                cropped_frames = TF.crop(frames, 0, 256 - 200, 200, 200)
+                cropped_targets = TF.resize(TF.crop(targets, 0, 64 - 50, 50, 50), (64, 64))
+
+            case 3:
+                cropped_frames = TF.crop(frames, 256 - 200, 256 - 200, 200, 200)
+                cropped_targets = TF.resize(TF.crop(targets, 64 - 50, 64 - 50, 50, 50), (64, 64))
+
+            case 4:
+                cropped_frames = TF.crop(frames, 256 - 200, 0, 200, 200)
+                cropped_targets = TF.resize(TF.crop(targets, 64 - 50, 0, 50, 50), (64, 64))
+
+            case 5:
+                cropped_frames = TF.crop(frames, 0, 28, 200, 200)
+                cropped_targets = TF.resize(TF.crop(targets, 0, 7, 50, 50), (64, 64))
+
+            case 6:
+                cropped_frames = TF.crop(frames, 28, 256 - 200, 200, 200)
+                cropped_targets = TF.resize(TF.crop(targets, 7, 64 - 50, 50, 50), (64, 64))
+
+            case 7:
+                cropped_frames = TF.crop(frames, 256 - 200, 28, 200, 200)
+                cropped_targets = TF.resize(TF.crop(targets, 64 - 50, 7, 50, 50), (64, 64))
+
+            case 8:
+                cropped_frames = TF.crop(frames, 28, 0, 200, 200)
+                cropped_targets = TF.resize(TF.crop(targets, 7, 0, 50, 50), (64, 64))
+
+        return cropped_frames, cropped_targets
 
 
 def create_frame_sequences(data, sequence_length, overlap_length, batch_size):
@@ -56,25 +105,31 @@ def create_target_sequences(data, sequence_length, overlap_length, batch_size):
     return torch.from_numpy(np.asarray(sequences))
 
 
-def get_data(fpath):
-    data = torch.load(fpath)
-    if not data[0].is_coalesced():
-        data[0] = data[0].coalesce()
+def get_data(fpaths):
+    frames_sequences = []
+    target_sequences = []
 
-    for i in range(4):
-        if not data[i + 1].is_coalesced():
-            data[i + 1] = data[i + 1].coalesce()
+    for fpath in fpaths:
+        data = torch.load(fpath)
+        if not data[0].is_coalesced():
+            data[0] = data[0].coalesce()
 
-    frames_tensor = data[0].to_dense().float()
-    targets = []
-    for i in range(4):
-        targets.append(data[i + 1].to_dense().float())
+        for i in range(4):
+            if not data[i + 1].is_coalesced():
+                data[i + 1] = data[i + 1].coalesce()
 
-    frames_sequence = create_frame_sequences(
-        frames_tensor, sequence_length, overlap_length, batch_size
-    )
+        frames_tensor = data[0].to_dense().float()
+        targets = []
+        for i in range(4):
+            targets.append(data[i + 1].to_dense().float())
 
-    target_sequences = create_target_sequences(targets, sequence_length, overlap_length, batch_size)
+        temp1 = create_frame_sequences(frames_tensor, sequence_length, overlap_length, batch_size)
+
+        frames_sequences.extend(temp1)
+
+        temp2 = create_target_sequences(targets, sequence_length, overlap_length, batch_size)
+
+        target_sequences.extend(temp2)
 
     # kfold = KFold(n_splits=3, shuffle=True, random_state=42)
 
@@ -84,7 +139,7 @@ def get_data(fpath):
     #     y_train, y_test = target_sequences[train_index], target_sequences[test_index]
 
     X_train, X_test, y_train, y_test = train_test_split(
-        frames_sequence,
+        frames_sequences,
         target_sequences,
         test_size=0.2,
         random_state=42,
@@ -98,18 +153,18 @@ def get_data(fpath):
         batch_size=batch_size,
         shuffle=True,
         drop_last=True,
-        num_workers=6,
-        pin_memory=True,
-        prefetch_factor=18,
+        num_workers=2,
+        pin_memory=False,
+        prefetch_factor=8,
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
         drop_last=True,
-        num_workers=6,
-        pin_memory=True,
-        prefetch_factor=18,
+        num_workers=2,
+        pin_memory=False,
+        prefetch_factor=8,
     )
 
     return train_loader, test_loader
