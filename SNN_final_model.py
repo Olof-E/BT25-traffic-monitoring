@@ -119,29 +119,21 @@ for layer_nr in nr_par_last_layer_list:
             self.lif5 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
             self.lif6 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
             self.lif7 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
-            self.lif8 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
-            self.lif9 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
-            self.lif10 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
-            self.lif11 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
 
             self.fcperson1 = nn.Linear(3200, layer_nr)
             self.fcperson2 = nn.Linear(layer_nr, layer_nr)
-            self.fcperson3 = nn.Linear(layer_nr, layer_nr)
             self.lifperson = LILinearCell(layer_nr, 4096)
 
             self.fccar1 = nn.Linear(3200, layer_nr)
             self.fccar2 = nn.Linear(layer_nr, layer_nr)
-            self.fccar3 = nn.Linear(layer_nr, layer_nr)
             self.lifcar = LILinearCell(layer_nr, 4096)
 
             self.fcbus1 = nn.Linear(3200, layer_nr)
             self.fcbus2 = nn.Linear(layer_nr, layer_nr)
-            self.fcbus3 = nn.Linear(layer_nr, layer_nr)
             self.lifbus = LILinearCell(layer_nr, 4096)
 
             self.fctruck1 = nn.Linear(3200, layer_nr)
             self.fctruck2 = nn.Linear(layer_nr, layer_nr)
-            self.fctruck3 = nn.Linear(layer_nr, layer_nr)
             self.liftruck = LILinearCell(layer_nr, 4096)
 
             self.maxpool = nn.MaxPool2d(2, 2)
@@ -159,16 +151,12 @@ for layer_nr in nr_par_last_layer_list:
                 mem3,
                 mem5_1,
                 mem5_2,
-                mem5_3,
                 mem6_1,
                 mem6_2,
-                mem6_3,
                 mem7_1,
                 mem7_2,
-                mem7_3,
                 mem8_1,
                 mem8_2,
-                mem8_3,
             ) = mem_states
 
             v1 = self.bn1(self.conv1(x))
@@ -186,61 +174,41 @@ for layer_nr in nr_par_last_layer_list:
 
             v5 = self.dropout2(self.fcperson1(spk3_flat))
             spk5_1, mem5_1 = self.lif4(v5, mem5_1)
-
             v5 = self.dropout2(self.fcperson2(spk5_1))
-            spk5_2, mem5_2 = self.lif5(v5, mem5_2)
-
-            v5 = self.fcperson3(spk5_2)
-            spk5_3, mem5_3 = self.lifperson(v5, mem5_3)
+            spk5_2, mem5_2 = self.lifperson(v5, mem5_2)
 
             v6 = self.dropout2(self.fccar1(spk3_flat))
-            spk6_1, mem6_1 = self.lif6(v6, mem6_1)
-
+            spk6_1, mem6_1 = self.lif5(v6, mem6_1)
             v6 = self.dropout2(self.fccar2(spk6_1))
-            spk6_2, mem6_2 = self.lif7(v6, mem6_2)
-
-            v6 = self.fccar3(spk6_2)
-            spk6_3, mem6_3 = self.lifcar(v6, mem6_3)
+            spk6_2, mem6_2 = self.lifcar(v6, mem6_2)
 
             v7 = self.dropout2(self.fcbus1(spk3_flat))
-            spk7_1, mem7_1 = self.lif8(v7, mem7_1)
-
+            spk7_1, mem7_1 = self.lif6(v7, mem7_1)
             v7 = self.dropout2(self.fcbus2(spk7_1))
-            spk7_2, mem7_2 = self.lif9(v7, mem7_2)
-
-            v7 = self.fcbus3(spk7_2)
-            spk7_3, mem7_3 = self.lifbus(v7, mem7_3)
+            spk7_2, mem7_2 = self.lifbus(v7, mem7_2)
 
             v8 = self.dropout2(self.fctruck1(spk3_flat))
-            spk8_1, mem8_1 = self.lif10(v8, mem8_1)
-
+            spk8_1, mem8_1 = self.lif7(v8, mem8_1)
             v8 = self.dropout2(self.fctruck2(spk8_1))
-            spk8_2, mem8_2 = self.lif11(v8, mem8_2)
-
-            v8 = self.fctruck3(spk8_2)
-            spk8_3, mem8_3 = self.liftruck(v8, mem8_3)
+            spk8_2, mem8_2 = self.liftruck(v8, mem8_2)
 
             return (
-                spk5_3,
-                spk6_3,
-                spk7_3,
-                spk8_3,
+                spk5_2,
+                spk6_2,
+                spk7_2,
+                spk8_2,
                 (
                     mem1,
                     mem2,
                     mem3,
                     mem5_1,
                     mem5_2,
-                    mem5_3,
                     mem6_1,
                     mem6_2,
-                    mem6_3,
                     mem7_1,
                     mem7_2,
-                    mem7_3,
                     mem8_1,
                     mem8_2,
-                    mem8_3,
                 ),
             )
 
