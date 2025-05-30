@@ -1,256 +1,341 @@
+import argparse
 import os
-from threading import Thread
+import warnings
 import cv2
-import math
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from matplotlib import patches
-from skimage import color, exposure, feature, filters, transform, util
+from threading import Thread
+from skimage import color, exposure, filters, transform, util
+from skimage.measure import ransac
+from skimage.feature import (
+    match_descriptors,
+    corner_peaks,
+    plot_matched_features,
+    BRIEF,
+)
 
+visualize = False
 
-visualize = True
-
-img = 0
+warnings.filterwarnings("ignore", message="No inliers found. Model not fitted*")
 
 
 def process_clip(event_path, normal_path):
-    global img
     torch.cuda.set_device(device=0)
-    model_matches = 0
-    total_error = 0
     event_data = torch.load(event_path)
 
     normal_cap = cv2.VideoCapture(normal_path)
 
-    matches = []
+    extractor = BRIEF(descriptor_size=256, patch_size=64, sigma=6, mode="normal")
+
     for i in tqdm(
         range(0, 5000, 50),
-        ncols=90,
+        ncols=86,
         mininterval=0.75,
+        leave=False,
     ):
-        normal_cap.set(1, 0 + i)
-        img_left2 = event_data[i + 1].to_dense()  # Read the Event frame
-        ret, img_right = normal_cap.read()  # Read the Normal frame
-        ret, img_right2 = normal_cap.read()  # Read the Normal frame
+        for j in range(2):
+            normal_cap.set(1, i + 10 * j)
+            img_left2 = (
+                event_data[i + 10 * j + 1].to_dense()
+                + event_data[i + 10 * j + 2].to_dense()
+                + event_data[i + 10 * j + 3].to_dense()
+                + event_data[i + 10 * j + 4].to_dense()
+            )  # Read the Event frame
+            _, img_right = normal_cap.read()  # Read the Normal frame
+            _ = normal_cap.grab()  # Read the Normal frame
+            _ = normal_cap.grab()  # Read the Normal frame
+            _ = normal_cap.grab()  # Read the Normal frame
 
-        img_left = exposure.adjust_gamma(filters.gaussian(img_left2, 10), 5)
+            _, img_right2 = normal_cap.read()  # Read the Normal frame
 
-        img_right = exposure.adjust_gamma(
-            filters.gaussian(
+            img_left = filters.gaussian(img_left2, 0.5)
+
+            img_right = filters.gaussian(
                 util.compare_images(
                     color.rgb2gray(img_right), color.rgb2gray(img_right2), method="diff"
                 ),
-                10,
-            ),
-            5,
-        )
+                0.6,
+            )
 
-        img_left = exposure.rescale_intensity(img_left)
-        img_right = exposure.rescale_intensity(img_right)
+            img_left = exposure.rescale_intensity(img_left)
+            img_right = exposure.rescale_intensity(img_right)
 
-        blobs1 = feature.blob_doh(
-            img_left, min_sigma=12, max_sigma=32, num_sigma=3, threshold_rel=0.45
-        )
-        blobs2 = feature.blob_doh(
-            img_right, min_sigma=12, max_sigma=32, num_sigma=3, threshold_rel=0.55
-        )
+            keypoints1 = corner_peaks(img_left, min_distance=2, threshold_rel=0.1)
+            keypoints2 = corner_peaks(img_right, min_distance=2, threshold_rel=0.1)
 
-        if visualize:
-            fig, axes = plt.subplots(1, 2, figsize=(12, 8))
+            extractor.extract(img_left, keypoints1)
+            keypoints1 = keypoints1[extractor.mask]
+            descriptors1 = extractor.descriptors
 
-            axes[0].imshow(img_left, cmap="magma")
-            axes[1].imshow(img_right, cmap="magma")
+            extractor.extract(img_right, keypoints2)
+            keypoints2 = keypoints2[extractor.mask]
+            descriptors2 = extractor.descriptors
 
-            for y1, x1, r1 in blobs1:
-                cirk1 = patches.Circle((x1, y1), radius=r1, linewidth=2, edgecolor="r", fill=False)
+            try:
+                matches12 = match_descriptors(
+                    descriptors1, descriptors2, cross_check=True, max_distance=1, max_ratio=0.7
+                )
 
-                axes[0].add_patch(cirk1)
+                # fig, ax = plt.subplots(nrows=1, ncols=1)
 
-            for y2, x2, r2 in blobs2:
+                # plot_matched_features(
+                #     img_left,
+                #     img_right,
+                #     keypoints0=keypoints1,
+                #     keypoints1=keypoints2,
+                #     matches=matches12,
+                #     ax=ax,
+                #     only_matches=True,
+                # )
+                # plt.show()
 
-                cirk2 = patches.Circle((x2, y2), radius=r2, linewidth=2, edgecolor="r", fill=False)
+                # tqdm.write(f"matches found {matches12.shape[0]}")
 
-                axes[1].add_patch(cirk2)
+                new_model, inliers = ransac(
+                    (keypoints1[matches12[:, 0]], keypoints2[matches12[:, 1]]),
+                    transform.SimilarityTransform,
+                    min_samples=8,
+                    residual_threshold=0.4,
+                    max_trials=1500,
+                )
 
-        for y1, x1, r1 in blobs1:
-            best_match = 0.2
-            best_index = -1
-            for i, (y2, x2, r2) in enumerate(blobs2):
-                error = math.dist((x1 / 640, y1 / 480), (x2 / 736, y2 / 460))
-                if error < best_match:
-                    best_match = error
-                    best_index = i
+                if inliers is not None and inliers.sum() >= 4:
 
-            if best_index != -1:
-                model_matches += 1
-                total_error += best_match
-                matches.append([[x1, y1], [x2, y2]])
-                if visualize:
-                    conn = patches.ConnectionPatch(
-                        xyA=(x1, y1),
-                        xyB=(blobs2[best_index][1], blobs2[best_index][0]),
-                        coordsA="data",
-                        coordsB="data",
-                        axesA=axes[0],
-                        axesB=axes[1],
-                        color="lightgreen",
-                        linewidth=3,
-                    )
+                    # fig, ax = plt.subplots(nrows=1, ncols=1)
 
-                    fig.add_artist(conn)
+                    # plot_matched_features(
+                    #     img_left,
+                    #     img_right,
+                    #     keypoints0=keypoints1,
+                    #     keypoints1=keypoints2,
+                    #     matches=matches12[inliers],
+                    #     ax=ax,
+                    #     only_matches=True,
+                    # )
+                    # plt.show()
 
-                    cirk1 = patches.Circle((x1, y1), radius=2, color="lightgreen", fill=True)
-                    cirk2 = patches.Circle(
-                        (blobs2[best_index][1], blobs2[best_index][0]),
-                        radius=2,
-                        color="lightgreen",
-                        fill=True,
-                    )
+                    normal_cap.release()
+                    tqdm.write("model found")
+                    return new_model
 
-                    axes[0].add_patch(cirk1)
-                    axes[1].add_patch(cirk2)
-
-        if visualize:
-            axes[0].axis("off")
-            axes[1].axis("off")
-            fig.tight_layout()
-            plt.show()
-            # fig.savefig(f"clips/test/{img}.png", bbox_inches="tight", pad_inches=0.1)
-            # img += 1
-
-            # plt.close(fig)
+            except:
+                continue
 
     normal_cap.release()
 
-    matches = np.array(matches)
-    model = transform.SimilarityTransform()
-    weight = 0
-    if len(matches) > 4:
-        model.estimate(matches[:, 0], matches[:, 1])
-        weight = 0.3 * model_matches + 0.7 * (model_matches - total_error * 10)
-
-    return model, weight
+    return None
 
 
-def calc_matrix(event_folder, normal_folder, start_clip, end_clip, results):
+def get_targets(directory, target_length, file_nr):
+    target_tensors = np.empty(target_length, dtype=object)
+
+    for filename in sorted(filter(lambda f: f.endswith(".txt"), os.listdir(directory))):
+        with open(os.path.join(directory, filename)) as file:
+            filename = filename.split("_")
+            if int(filename[1]) != file_nr:
+                continue
+            target_data = [
+                float(value)
+                for line in file
+                if line.strip().split()[0] in str(("0", "2", "5", "7"))
+                for value in line.split()[0:5]
+            ]
+            target_tensor = torch.tensor(target_data, dtype=torch.float16).view(-1, 5)
+            target_tensors[int(filename[2].rsplit(".", maxsplit=1)[0]) - 1] = target_tensor
+    return target_tensors
+
+
+def process_clip_sequence(event_folder, normal_folder, start_clip, end_clip, results):
 
     models = []
-    weights = []
     for i in range(start_clip, end_clip + 1):
-        model, weight = process_clip(
-            f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4"
-        )
-        models.append(model.params)
-        weights.append(weight)
+        model = process_clip(f"{event_folder}event_frames_{i}.pt", f"{normal_folder}_{i}.mp4")
+        if model is not None:
+            models.append(model.params)
 
     models = np.array(models)
-    weights = np.array(weights)
 
-    weights = weights / weights.sum()
+    if len(models) > 0:
+        model = transform.SimilarityTransform()
+        model.params = np.average(
+            models,
+            axis=0,
+        )
 
-    model = transform.SimilarityTransform()
-    model.params = np.average(
+        results.append(model.params)
+
+
+def calc_H_matrix(input_dir, start_clip, end_clip, save_vid=False):
+    models = []
+
+    # input_dir = "w31/box2/2-07-31"  # "w35/box1/1-09-04"
+
+    # "w31/box2/2-07-31"
+    # "w35/box1/1-09-04"
+
+    clip_per_thread = (end_clip - start_clip) // 3
+    if not visualize:
+
+        t1 = Thread(
+            target=process_clip_sequence,
+            args=[
+                f"{input_dir}events/",
+                f"{input_dir}normal/",
+                start_clip + clip_per_thread * 2 + 1,
+                end_clip,
+                models,
+            ],
+        )
+        t1.start()
+
+        t2 = Thread(
+            target=process_clip_sequence,
+            args=[
+                f"{input_dir}events/",
+                f"{input_dir}normal/",
+                start_clip + clip_per_thread * 1 + 1,
+                start_clip + clip_per_thread * 2,
+                models,
+            ],
+        )
+        t2.start()
+
+    process_clip_sequence(
+        f"{input_dir}events/",
+        f"{input_dir}normal/",
+        start_clip,
+        start_clip + clip_per_thread * 1,
         models,
-        axis=0,
-        weights=weights,
     )
 
-    results.append(model.params)
+    if not visualize:
+        t1.join()
+        t2.join()
+
+    if len(models) > 0:
+        model = transform.SimilarityTransform()
+
+        model.params = np.average(models, axis=0)
+
+        print(repr(model))
+        np.save(f"{input_dir}/homography-matrix.npy", model)
+
+        if save_vid:
+            event_data = torch.load(f"{input_dir}events/event_frames_6.pt")
+
+            normal_cap = cv2.VideoCapture(f"{input_dir}normal/_6.mp4")
+
+            target_tensors = get_targets(f"{input_dir}track/labels/", 5400, 6)
+
+            out = cv2.VideoWriter(
+                filename=f"{input_dir}homography-vis.mp4",
+                fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
+                fps=90,
+                frameSize=(
+                    640 + 736,
+                    480,
+                ),
+                isColor=False,
+            )
+
+            for frame_idx in tqdm(
+                range(int(len(event_data)) // 2),
+                desc=f"annotating frames",
+                ncols=86,
+                mininterval=0.25,
+            ):
+                frame = event_data[frame_idx].to_dense() * 255
+                ret, img_right = normal_cap.read()
+                combined_frame = np.concatenate(
+                    (
+                        frame,
+                        np.concatenate(
+                            (cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY), np.full((20, 736), 255))
+                        ),
+                    ),
+                    axis=1,
+                )
+                for t in range(len(target_tensors[frame_idx])):
+                    # ===========================
+                    # Event Image
+                    # ===========================
+
+                    center_x, center_y = target_tensors[frame_idx][t][1:3].numpy() * [736, 460]
+                    w, h = target_tensors[frame_idx][t][3:].numpy() * [736, 460]
+
+                    x_min, y_min = np.array([center_x, center_y]) - [w / 2, h / 2]
+                    x_max, y_max = np.array([center_x, center_y]) + [w / 2, h / 2]
+
+                    y_min, x_min = model._apply_mat((y_min, x_min), model.inverse.params)[0]
+                    y_max, x_max = model._apply_mat((y_max, x_max), model.inverse.params)[0]
+
+                    center_y, center_x = model._apply_mat(
+                        (center_y, center_x), model.inverse.params
+                    )[0]
+
+                    cv2.rectangle(
+                        img=combined_frame,
+                        pt1=(int(x_min), int(y_min)),
+                        pt2=(int(x_max), int(y_max)),
+                        color=(255, 0, 0),
+                        thickness=2,
+                    )
+
+                    # ===========================
+                    # Normal Image
+                    # ===========================
+                    center_x, center_y = target_tensors[frame_idx][t][1:3].numpy() * [736, 460]
+                    w, h = target_tensors[frame_idx][t][3:].numpy() * [736, 460]
+
+                    x_min, y_min = np.array([center_x, center_y]) - [w / 2, h / 2]
+                    x_max, y_max = np.array([center_x, center_y]) + [w / 2, h / 2]
+                    cv2.rectangle(
+                        img=combined_frame,
+                        pt1=(int(x_min + 640), int(y_min)),
+                        pt2=(int(x_max + 640), int(y_max)),
+                        color=(255, 0, 0),
+                        thickness=2,
+                    )
+
+                out.write(np.uint8(combined_frame))
+
+            out.release()
+            normal_cap.release()
 
 
-models = []
-
-if not visualize:
-    t = Thread(target=calc_matrix, args=["clips/events/", "2-08/", 4, 5, models])
-    t.start()
-
-    t1 = Thread(target=calc_matrix, args=["clips/events/", "2-08/", 6, 7, models])
-    t1.start()
-
-
-calc_matrix("clips/events/", "2-08/", 2, 3, models)
-
-if not visualize:
-    t.join()
-    t1.join()
-
-
-model = transform.SimilarityTransform()
-
-
-model.params = np.average(
-    models,
-    axis=0,
-    weights=[1 / len(models)] * len(models),
+parser = argparse.ArgumentParser(
+    description="A script that calculates the homography matrix between event- and normal footage",
+    usage="%(prog)s <path/to/data/> [options]",
 )
 
+parser.add_argument(
+    "input_dir", help="The path to the directory containing the event, normal, and tracking data"
+)
 
-event_data = torch.load("clips/events/event_frames_2.pt")
+parser.add_argument(
+    "-s",
+    "--start-clip",
+    default=0,
+    type=int,
+    help="The clip to start calculating the homography matrix from (default: %(default)s)",
+)
+parser.add_argument(
+    "-e",
+    "--end-clip",
+    default=1,
+    type=int,
+    help="The clip to stop calculating the homography matrix at (default: %(default)s)",
+)
+parser.add_argument(
+    "--save-vid",
+    action="store_true",
+    default=False,
+    help="Can be set to also generate .mp4 files of the found homography matrix (default: %(default)s)",
+)
 
-normal_cap = cv2.VideoCapture("2-08/_2.mp4")
-
-normal_cap.set(1, 3690)
-img_left = event_data[3690].to_dense()
-ret, img_right = normal_cap.read()
-
-target_tensor = None
-
-with open(os.path.join("./yolo/results/track2/labels", "_2_3690.txt")) as file:
-    target_data = [
-        float(value)
-        for line in file
-        if line.strip().split()[0] in ("2", "5", "7", "61")
-        for value in line.split()[1:5]
-    ]
-    target_tensor = torch.tensor(target_data, dtype=torch.float16).view(-1, 4)
-
-fig, axes = plt.subplots(1, 2, figsize=(12, 8))
-
-axes[0].imshow(img_left, cmap="gray")
-axes[1].imshow(img_right, cmap="brg")
-
-
-for t in range(len(target_tensor)):
-    # ===========================
-    # Event Image
-    # ===========================
-    center_x, center_y = target_tensor[t][:2].numpy() * [736, 460]
-    w, h = target_tensor[t][2:].numpy() * [736, 460]
-
-    x_min, y_min = np.array([center_x, center_y]) - [w / 2, h / 2]
-    x_max, y_max = np.array([center_x, center_y]) + [w / 2, h / 2]
-
-    x_min, y_min = model._apply_mat((x_min, y_min), model.inverse.params)[0]
-    x_max, y_max = model._apply_mat((x_max, y_max), model.inverse.params)[0]
-
-    center_x, center_y = model._apply_mat((center_x, center_y), model.inverse.params)[0]
-
-    rect = patches.Rectangle(
-        (x_min, y_min), x_max - x_min, y_max - y_min, linewidth=1, edgecolor="r", facecolor="none"
-    )
-    cirk = patches.Circle((center_x, center_y), radius=1, edgecolor="r", facecolor="red")
-    axes[0].add_patch(rect)
-    axes[0].add_patch(cirk)
-
-    # ===========================
-    # Normal Image
-    # ===========================
-    center_x, center_y = target_tensor[t][:2].numpy() * [736, 460]
-    w, h = target_tensor[t][2:].numpy() * [736, 460]
-
-    x_min, y_min = np.array([center_x, center_y]) - [w / 2, h / 2]
-    x_max, y_max = np.array([center_x, center_y]) + [w / 2, h / 2]
-
-    rect = patches.Rectangle((x_min, y_min), w, h, linewidth=1, edgecolor="r", facecolor="none")
-    cirk = patches.Circle((center_x, center_y), radius=1, edgecolor="r", facecolor="red")
-    axes[1].add_patch(rect)
-    axes[1].add_patch(cirk)
+args = parser.parse_args()
 
 
-plt.tight_layout()
-plt.show()
-
-
-normal_cap.release()
+calc_H_matrix(args.input_dir, args.start_clip, args.end_clip, args.save_vid)
