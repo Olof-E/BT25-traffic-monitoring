@@ -37,12 +37,12 @@ class SNN(nn.Module):
         self.bn1 = nn.BatchNorm2d(8)
         self.lif1 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
 
-        self.conv2 = nn.Conv2d(8, 8, kernel_size=5, stride=2, padding=0)
-        self.bn2 = nn.BatchNorm2d(8)
+        self.conv2 = nn.Conv2d(8, 10, kernel_size=5, stride=2, padding=0)
+        self.bn2 = nn.BatchNorm2d(10)
         self.lif2 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
 
-        self.conv3 = nn.Conv2d(8, 8, kernel_size=3, stride=1, padding=0)
-        self.bn3 = nn.BatchNorm2d(8)
+        self.conv3 = nn.Conv2d(10, 10, kernel_size=3, stride=1, padding=0)
+        self.bn3 = nn.BatchNorm2d(10)
         self.lif3 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
 
         self.lif4 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
@@ -50,26 +50,26 @@ class SNN(nn.Module):
         self.lif6 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
         self.lif7 = LIFCell(p=LIFParameters(tau_mem_inv=tau_mem))
 
-        self.fcperson1 = nn.Linear(3200, layer_nr)
+        self.fcperson1 = nn.Linear(4000, layer_nr)
         self.fcperson2 = nn.Linear(layer_nr, layer_nr)
         self.lifperson = LILinearCell(layer_nr, 4096)
 
-        self.fccar1 = nn.Linear(3200, layer_nr)
+        self.fccar1 = nn.Linear(4000, layer_nr)
         self.fccar2 = nn.Linear(layer_nr, layer_nr)
         self.lifcar = LILinearCell(layer_nr, 4096)
 
-        self.fcbus1 = nn.Linear(3200, layer_nr)
+        self.fcbus1 = nn.Linear(4000, layer_nr)
         self.fcbus2 = nn.Linear(layer_nr, layer_nr)
         self.lifbus = LILinearCell(layer_nr, 4096)
 
-        self.fctruck1 = nn.Linear(3200, layer_nr)
+        self.fctruck1 = nn.Linear(4000, layer_nr)
         self.fctruck2 = nn.Linear(layer_nr, layer_nr)
         self.liftruck = LILinearCell(layer_nr, 4096)
 
         self.maxpool = nn.MaxPool2d(2, 2)
         # self.avgpool = nn.AvgPool2d(2, 2)
-        self.dropout1 = nn.Dropout(p=0.4)
-        self.dropout2 = nn.Dropout(p=0.5)
+        self.dropout1 = nn.Dropout(p=0.35)
+        self.dropout2 = nn.Dropout(p=0.45)
 
     def forward(self, x, mem_states):
         batch_size, C, W, H = x.shape
@@ -160,7 +160,7 @@ model = SNN()
 
 
 model.load_state_dict(
-    torch.load("models/new-model-36.16.pth", weights_only=True, map_location="cuda:0")
+    torch.load("models/new-model-35.45.pth", weights_only=True, map_location="cuda:0")
 )
 model = model.to(device)
 model.eval()
@@ -256,22 +256,26 @@ def animate(step):
 
         output_img1.set(
             data=final_output1[0].cpu().detach().numpy(),
+            # clim=(minimum, max(minimum, maximum)),
             clim=(1, max(1, torch.max(final_output1[0]).item())),
         )
 
         output_img2.set(
             data=final_output2[0].cpu().detach().numpy(),
-            clim=(minimum, max(2, torch.max(final_output2[0]).item())),
+            # clim=(minimum, max(minimum, maximum)),
+            clim=(minimum, max(minimum, torch.max(final_output2[0]).item())),
         )
 
         output_img3.set(
             data=final_output3[0].cpu().detach().numpy(),
-            clim=(minimum, max(2, torch.max(final_output3[0]).item())),
+            # clim=(minimum, max(minimum, maximum)),
+            clim=(minimum, max(minimum, torch.max(final_output3[0]).item())),
         )
 
         output_img4.set(
             data=final_output4[0].cpu().detach().numpy(),
-            clim=(minimum, max(2, torch.max(final_output4[0]).item())),
+            # clim=(minimum, max(minimum, maximum)),
+            clim=(minimum, max(minimum, torch.max(final_output4[0]).item())),
         )
 
     # frame = None
@@ -299,7 +303,7 @@ ani = animation.FuncAnimation(
 
 # plt.show()
 
-save_dir = "test-anim-multi-full-dataset-maybework-deepnet9.mp4"  # os.path.join(os.path.dirname(sys.argv[0]), 'MyVideo.mp4')
+save_dir = "test-anim-multi-full-dataset-maybework-deepnet10.mp4"  # os.path.join(os.path.dirname(sys.argv[0]), 'MyVideo.mp4')
 print(f"Saving video to {save_dir}...")
 video_writer = animation.FFMpegWriter(fps=90, bitrate=-1)
 update_func = lambda _i, _n: progress_bar.update(1)
